@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from registry.models import RegistryData
 
 
@@ -19,9 +21,9 @@ class RegistryValidator:
     def validate(self) -> list[ValidationError]:
         self.errors.clear()
         self._check_domain_codes()
-        self._check_table_fqn_unique()
-        self._check_column_fqn_unique()
-        self._check_column_table_ref()
+        self._check_entity_fqn_unique()
+        self._check_property_fqn_unique()
+        self._check_property_entity_ref()
         self._check_fk_ref()
         self._check_relationship_ref()
         self._check_domain_refs()
@@ -39,75 +41,66 @@ class RegistryValidator:
                     ValidationError("Domain", i + 2, f"parent_code '{d.parent_code}' not found")
                 )
 
-    def _check_table_fqn_unique(self):
+    def _check_entity_fqn_unique(self):
         seen = {}
-        for i, t in enumerate(self.data.tables):
-            if t.fqn in seen:
+        for i, e in enumerate(self.data.entities):
+            if not e.entity_type:
                 self.errors.append(
-                    ValidationError("Table", i + 2, f"duplicate fqn '{t.fqn}' (also at row {seen[t.fqn]})")
+                    ValidationError("Entity", i + 2, f"entity_type is empty for fqn '{e.fqn}'")
                 )
-            seen[t.fqn] = i + 2
+            if e.fqn in seen:
+                self.errors.append(
+                    ValidationError("Entity", i + 2, f"duplicate fqn '{e.fqn}' (also at row {seen[e.fqn]})")
+                )
+            seen[e.fqn] = i + 2
 
-    def _check_column_fqn_unique(self):
+    def _check_property_fqn_unique(self):
         seen = {}
-        for i, c in enumerate(self.data.columns):
-            if c.fqn in seen:
+        for i, p in enumerate(self.data.properties):
+            if p.fqn in seen:
                 self.errors.append(
-                    ValidationError("Column", i + 2, f"duplicate fqn '{c.fqn}' (also at row {seen[c.fqn]})")
+                    ValidationError("Property", i + 2, f"duplicate fqn '{p.fqn}' (also at row {seen[p.fqn]})")
                 )
-            seen[c.fqn] = i + 2
+            seen[p.fqn] = i + 2
 
-    def _check_column_table_ref(self):
-        table_fqns = {t.fqn for t in self.data.tables}
-        for i, c in enumerate(self.data.columns):
-            if c.table_fqn not in table_fqns:
+    def _check_property_entity_ref(self):
+        entity_fqns = {e.fqn for e in self.data.entities}
+        for i, p in enumerate(self.data.properties):
+            if p.entity_fqn not in entity_fqns:
                 self.errors.append(
-                    ValidationError("Column", i + 2, f"table_fqn '{c.table_fqn}' not found in Table sheet")
+                    ValidationError("Property", i + 2, f"entity_fqn '{p.entity_fqn}' not found in Entity sheet")
                 )
 
     def _check_fk_ref(self):
-        col_fqns = {c.fqn for c in self.data.columns}
-        for i, c in enumerate(self.data.columns):
-            if c.is_fk and c.ref_column_fqn:
-                if c.ref_column_fqn not in col_fqns:
+        prop_fqns = {p.fqn for p in self.data.properties}
+        for i, p in enumerate(self.data.properties):
+            if p.is_fk and p.ref_property_fqn:
+                if p.ref_property_fqn not in prop_fqns:
                     self.errors.append(
-                        ValidationError("Column", i + 2, f"FK ref_column_fqn '{c.ref_column_fqn}' not found")
+                        ValidationError("Property", i + 2, f"FK ref_property_fqn '{p.ref_property_fqn}' not found")
                     )
 
     def _check_relationship_ref(self):
-        col_fqns = {c.fqn for c in self.data.columns}
-        table_fqns = {t.fqn for t in self.data.tables}
+        all_fqns = {p.fqn for p in self.data.properties}
+        all_fqns |= {e.fqn for e in self.data.entities}
+        all_fqns |= {d.code for d in self.data.domains}
         for i, r in enumerate(self.data.relationships):
-            if r.node_level == "column":
-                if r.src_fqn not in col_fqns:
-                    self.errors.append(
-                        ValidationError("Relationship", i + 2, f"src_fqn '{r.src_fqn}' not found in Column sheet")
-                    )
-                if r.dst_fqn not in col_fqns:
-                    self.errors.append(
-                        ValidationError("Relationship", i + 2, f"dst_fqn '{r.dst_fqn}' not found in Column sheet")
-                    )
-            else:
-                if r.src_fqn not in table_fqns:
-                    self.errors.append(
-                        ValidationError("Relationship", i + 2, f"src_fqn '{r.src_fqn}' not found in Table sheet")
-                    )
-                if r.dst_fqn not in table_fqns:
-                    self.errors.append(
-                        ValidationError("Relationship", i + 2, f"dst_fqn '{r.dst_fqn}' not found in Table sheet")
-                    )
+            if r.src_fqn not in all_fqns:
+                self.errors.append(
+                    ValidationError("Relationship", i + 2,
+                                   f"src_fqn '{r.src_fqn}' not found in any sheet (Entity/Property/Domain)")
+                )
+            if r.dst_fqn not in all_fqns:
+                self.errors.append(
+                    ValidationError("Relationship", i + 2,
+                                   f"dst_fqn '{r.dst_fqn}' not found in any sheet (Entity/Property/Domain)")
+                )
 
     def _check_domain_refs(self):
         domain_codes = {d.code for d in self.data.domains}
-        for i, t in enumerate(self.data.tables):
-            for dc in t.domains:
+        for i, e in enumerate(self.data.entities):
+            for dc in e.domains:
                 if dc not in domain_codes:
                     self.errors.append(
-                        ValidationError("Table", i + 2, f"domain '{dc}' not found in Domain sheet")
-                    )
-        for i, c in enumerate(self.data.columns):
-            for dc in c.domains:
-                if dc not in domain_codes:
-                    self.errors.append(
-                        ValidationError("Column", i + 2, f"domain '{dc}' not found in Domain sheet")
+                        ValidationError("Entity", i + 2, f"domain '{dc}' not found in Domain sheet")
                     )

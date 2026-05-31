@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -26,7 +28,7 @@ TOOL = {
 }
 
 
-async def _sanitize(value: str) -> str:
+def _sanitize(value: str) -> str:
     return value.replace("'", "").replace("\\", "")
 
 

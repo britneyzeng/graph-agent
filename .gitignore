@@ -21,5 +21,6 @@ env/
 .DS_Store
 Thumbs.db
 
-# Project specific
-registry/*.xlsx
+# Environment
+.env
+*.lock

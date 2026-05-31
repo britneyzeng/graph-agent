@@ -6,9 +6,13 @@ lineage trace, join path discovery, SQL execution, risk check, and graph insight
 """
 
 import logging
+from pathlib import Path
 
+from dotenv import load_dotenv
 from mh_service_kit import ServiceApp
 from minimal_harness.client.logging_setup import setup_service_logging
+
+load_dotenv(Path(__file__).parent / ".env")
 
 from neo4j_client import close_neo4j_client
 from pg_client import close_pg_client

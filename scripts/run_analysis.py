@@ -1,7 +1,7 @@
 """Run GDS graph analysis and write results back to registry.
 
 Usage:
-    python -m scripts.run_analysis --algo centrality --xlsx registry/mock_data.xlsx
+    python -m scripts.run_analysis --algo centrality --xlsx registry/manual_registry.xlsx
     python -m scripts.run_analysis --algo louvain --resolution 1.5
     python -m scripts.run_analysis --algo all
 """
@@ -20,7 +20,7 @@ logger = logging.getLogger("run_analysis")
 def main():
     parser = argparse.ArgumentParser(description="Run GDS graph analysis")
     parser.add_argument("--algo", choices=["centrality", "louvain", "similarity", "all"], default="all")
-    parser.add_argument("--xlsx", "-x", default="registry/mock_data.xlsx")
+    parser.add_argument("--xlsx", "-x", default="registry/manual_registry.xlsx")
     parser.add_argument("--resolution", type=float, default=1.0, help="Louvain resolution (>1 for finer)")
     parser.add_argument("--top-k", type=int, default=10, help="Top K for similarity")
     parser.add_argument("--domain", default=None, help="Optional domain filter")

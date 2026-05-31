@@ -1,25 +1,29 @@
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
 
+from typing import Any
+
 from openpyxl import load_workbook
 
 from registry.models import (
-    ColumnDef,
     DomainDef,
+    EntityDef,
+    PropertyDef,
     RegistryData,
     RelationshipDef,
-    TableDef,
 )
 
 logger = logging.getLogger(__name__)
 
 SHEET_DOMAIN = "Domain"
-SHEET_TABLE = "Table"
-SHEET_COLUMN = "Column"
+SHEET_ENTITY = "Entity"
+SHEET_PROPERTY = "Property"
 SHEET_RELATIONSHIP = "Relationship"
 
-REQUIRED_SHEETS = {SHEET_DOMAIN, SHEET_TABLE, SHEET_COLUMN, SHEET_RELATIONSHIP}
+REQUIRED_SHEETS = {SHEET_DOMAIN, SHEET_ENTITY, SHEET_PROPERTY, SHEET_RELATIONSHIP}
 
 
 class RegistryLoader:
@@ -39,8 +43,8 @@ class RegistryLoader:
 
         data = RegistryData(
             domains=self._load_domains(wb),
-            tables=self._load_tables(wb),
-            columns=self._load_columns(wb),
+            entities=self._load_entities(wb),
+            properties=self._load_properties(wb),
             relationships=self._load_relationships(wb),
         )
         wb.close()
@@ -56,55 +60,58 @@ class RegistryLoader:
             result.append(
                 DomainDef(
                     code=str(row[0]).strip(),
-                    name=str(row[1]).strip() if row[1] else "",
-                    parent_code=str(row[2]).strip() if row[2] else None,
-                    description=str(row[3]).strip() if len(row) > 3 and row[3] else "",
-                    source=str(row[4]).strip() if len(row) > 4 and row[4] else "manual",
+                    name_cn=str(row[1]).strip() if row[1] else "",
+                    name_en=str(row[2]).strip() if len(row) > 2 and row[2] else "",
+                    parent_code=str(row[3]).strip() if len(row) > 3 and row[3] else None,
+                    description=str(row[4]).strip() if len(row) > 4 and row[4] else "",
+                    source=str(row[5]).strip() if len(row) > 5 and row[5] else "manual",
+                    status=str(row[6]).strip() if len(row) > 6 and row[6] else "active",
                 )
             )
         return result
 
-    def _load_tables(self, wb) -> list[TableDef]:
-        ws = wb[SHEET_TABLE]
+    def _load_entities(self, wb) -> list[EntityDef]:
+        ws = wb[SHEET_ENTITY]
         rows = list(ws.iter_rows(min_row=2, values_only=True))
         result = []
         for row in rows:
             if not row or not row[0]:
                 continue
             result.append(
-                TableDef(
+                EntityDef(
                     fqn=str(row[0]).strip(),
-                    schema_name=str(row[1]).strip() if row[1] else "",
-                    table_name=str(row[2]).strip() if row[2] else "",
-                    type=str(row[3]).strip() if len(row) > 3 and row[3] else "table",
-                    business_object=str(row[4]).strip() if len(row) > 4 and row[4] else "",
-                    domains=self._parse_csv(row[5]) if len(row) > 5 else [],
-                    comment=str(row[6]).strip() if len(row) > 6 and row[6] else "",
-                    status=str(row[7]).strip() if len(row) > 7 and row[7] else "active",
+                    entity_type=str(row[1]).strip() if row[1] else "",
+                    name_cn=str(row[2]).strip() if len(row) > 2 and row[2] else "",
+                    name_en=str(row[3]).strip() if len(row) > 3 and row[3] else "",
+                    src_tables=self._parse_json(row[4]) if len(row) > 4 and row[4] else [],
+                    domains=self._parse_json(row[5]) if len(row) > 5 and row[5] else [],
+                    description=str(row[6]).strip() if len(row) > 6 and row[6] else "",
+                    source=str(row[7]).strip() if len(row) > 7 and row[7] else "manual",
+                    status=str(row[8]).strip() if len(row) > 8 and row[8] else "active",
                 )
             )
         return result
 
-    def _load_columns(self, wb) -> list[ColumnDef]:
-        ws = wb[SHEET_COLUMN]
+    def _load_properties(self, wb) -> list[PropertyDef]:
+        ws = wb[SHEET_PROPERTY]
         rows = list(ws.iter_rows(min_row=2, values_only=True))
         result = []
         for row in rows:
             if not row or not row[0]:
                 continue
             result.append(
-                ColumnDef(
+                PropertyDef(
                     fqn=str(row[0]).strip(),
-                    table_fqn=str(row[1]).strip() if row[1] else "",
-                    name=str(row[2]).strip() if row[2] else "",
-                    data_type=str(row[3]).strip() if row[3] else "unknown",
-                    nullable=self._parse_bool(row[4]) if len(row) > 4 else True,
-                    is_pk=self._parse_bool(row[5]) if len(row) > 5 else False,
-                    is_fk=self._parse_bool(row[6]) if len(row) > 6 else False,
-                    ref_column_fqn=str(row[7]).strip() if len(row) > 7 and row[7] else None,
-                    semantic_type=str(row[8]).strip() if len(row) > 8 and row[8] else "",
-                    domains=self._parse_csv(row[9]) if len(row) > 9 else [],
-                    comment=str(row[10]).strip() if len(row) > 10 and row[10] else "",
+                    entity_fqn=str(row[1]).strip() if row[1] else "",
+                    data_type=str(row[2]).strip() if row[2] else "unknown",
+                    is_pk=self._parse_bool(row[3]) if len(row) > 3 else False,
+                    is_fk=self._parse_bool(row[4]) if len(row) > 4 else False,
+                    ref_property_fqn=str(row[5]).strip() if len(row) > 5 and row[5] else None,
+                    description=str(row[6]).strip() if len(row) > 6 and row[6] else "",
+                    name_cn=str(row[7]).strip() if len(row) > 7 and row[7] else "",
+                    name_en=str(row[8]).strip() if len(row) > 8 and row[8] else "",
+                    source=str(row[9]).strip() if len(row) > 9 and row[9] else "manual",
+                    status=str(row[10]).strip() if len(row) > 10 and row[10] else "active",
                 )
             )
         return result
@@ -120,21 +127,13 @@ class RegistryLoader:
                 RelationshipDef(
                     src_fqn=str(row[0]).strip(),
                     dst_fqn=str(row[1]).strip() if row[1] else "",
-                    node_level=str(row[2]).strip() if len(row) > 2 and row[2] else "column",
-                    rel_type=str(row[3]).strip() if len(row) > 3 and row[3] else "REFERENCES",
-                    is_directed=self._parse_bool(row[4]) if len(row) > 4 else True,
-                    properties=self._parse_json(row[5]) if len(row) > 5 else {},
-                    source=str(row[6]).strip() if len(row) > 6 and row[6] else "introspect",
-                    status=str(row[7]).strip() if len(row) > 7 and row[7] else "active",
+                    rel_type=str(row[2]).strip() if len(row) > 2 and row[2] else "REFERENCES",
+                    is_directed=self._parse_bool(row[3]) if len(row) > 3 else True,
+                    source=str(row[4]).strip() if len(row) > 4 and row[4] else "introspect",
+                    status=str(row[5]).strip() if len(row) > 5 and row[5] else "active",
                 )
             )
         return result
-
-    @staticmethod
-    def _parse_csv(value: str | None) -> list[str]:
-        if not value:
-            return []
-        return [s.strip() for s in str(value).split(",") if s.strip()]
 
     @staticmethod
     def _parse_bool(value) -> bool:
@@ -146,7 +145,7 @@ class RegistryLoader:
         return s in ("true", "yes", "1", "是", "y")
 
     @staticmethod
-    def _parse_json(value: str | None) -> dict:
+    def _parse_json(value: str | None) -> Any:
         if not value:
             return {}
         if isinstance(value, dict):

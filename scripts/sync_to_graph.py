@@ -1,12 +1,12 @@
 """Sync registry Excel to Neo4j schema graph.
 
 Usage:
-    python -m scripts.sync_to_graph --xlsx registry/mock_data.xlsx
-    python -m scripts.sync_to_graph --xlsx registry/mock_data.xlsx --validate-only
-    python -m scripts.sync_to_graph --xlsx registry/mock_data.xlsx --mode incremental
+    python -m scripts.sync_to_graph --xlsx registry/manual_registry.xlsx
+    python -m scripts.sync_to_graph --xlsx registry/manual_registry.xlsx --validate-only
 """
 
 import argparse
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -22,8 +22,7 @@ logger = logging.getLogger("sync_to_graph")
 
 def main():
     parser = argparse.ArgumentParser(description="Sync registry Excel to Neo4j")
-    parser.add_argument("--xlsx", "-x", default="registry/mock_data.xlsx", help="Registry Excel path")
-    parser.add_argument("--mode", "-m", choices=["full", "incremental"], default="full", help="Sync mode")
+    parser.add_argument("--xlsx", "-x", default="registry/manual_registry.xlsx", help="Registry Excel path")
     parser.add_argument("--validate-only", action="store_true", help="Only validate, skip graph sync")
     args = parser.parse_args()
 
@@ -37,8 +36,8 @@ def main():
 
     logger.info("Loading registry from %s ...", xlsx_path)
     data = RegistryLoader(xlsx_path).load()
-    logger.info("Loaded %d domains, %d tables, %d columns, %d relationships",
-                len(data.domains), len(data.tables), len(data.columns), len(data.relationships))
+    logger.info("Loaded %d domains, %d entities, %d properties, %d relationships",
+                len(data.domains), len(data.entities), len(data.properties), len(data.relationships))
 
     validator = RegistryValidator(data)
     errors = validator.validate()
@@ -54,7 +53,7 @@ def main():
 
     from builder.graph_builder import GraphBuilder
     builder = GraphBuilder(data)
-    builder.sync_all()
+    asyncio.run(builder.sync_all())
     logger.info("Done.")
 
 

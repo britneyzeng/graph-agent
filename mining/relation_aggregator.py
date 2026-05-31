@@ -6,6 +6,8 @@ Aggregates raw ParseResult across thousands of SQL files into:
   - CO_USED_WITH: (tableA, tableB) → count, pmi
 """
 
+from __future__ import annotations
+
 import logging
 import math
 from collections import Counter, defaultdict

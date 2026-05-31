@@ -6,6 +6,8 @@ Extracts three types of evidence from PostgreSQL SQL:
   - Table CO_USED_WITH co-occurrence (per-procedure table sets)
 """
 
+from __future__ import annotations
+
 import hashlib
 import logging
 import re

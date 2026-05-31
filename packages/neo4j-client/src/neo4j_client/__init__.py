@@ -16,10 +16,20 @@ from neo4j_client.client import (
 )
 from neo4j_client.graph_handler import transform_paths_to_graph
 
+try:
+    from neo4j_client.mock_client import MockNeo4jClient, get_mock_client, close_mock_client
+except ImportError:
+    MockNeo4jClient = None  # type: ignore
+    get_mock_client = None  # type: ignore
+    close_mock_client = None  # type: ignore
+
 __all__ = [
     "Neo4jClient",
     "Neo4jClientError",
+    "MockNeo4jClient",
     "close_neo4j_client",
+    "close_mock_client",
     "get_neo4j_client",
+    "get_mock_client",
     "transform_paths_to_graph",
 ]

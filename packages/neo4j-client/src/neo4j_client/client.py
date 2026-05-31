@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import logging
 from threading import Lock
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from neo4j_client.mock_client import MockNeo4jClient
 
 logger = logging.getLogger(__name__)
 
@@ -274,10 +277,12 @@ class Neo4jClient:
 _neo4j_client: Neo4jClient | None = None
 
 
-def get_neo4j_client() -> Neo4jClient:
+def get_neo4j_client() -> Neo4jClient | MockNeo4jClient:
     """Get or create the global Neo4j client instance.
 
-    The client is configured from environment variables:
+    When A20_NEO4J_MOCK=1 is set, returns an in-memory MockNeo4jClient
+    for local development.  Otherwise connects to a real Neo4j instance
+    configured from environment variables:
         - A20_NEO4J_SCHEMA_URI: Schema database URI
         - A20_NEO4J_SCHEMA_USER: Schema database username
         - A20_NEO4J_SCHEMA_PASSWORD: Schema database password
@@ -288,17 +293,21 @@ def get_neo4j_client() -> Neo4jClient:
         - A20_NEO4J_DATA_DATABASE: Data database name (default: neo4j)
 
     Returns:
-        Neo4jClient instance
+        Neo4jClient or MockNeo4jClient instance
 
     Raises:
         Neo4jClientError: If required configuration is not set
     """
+    import os
+
+    if os.getenv("A20_NEO4J_MOCK") == "1":
+        from neo4j_client.mock_client import get_mock_client as _get_mock
+        return _get_mock()
+
     global _neo4j_client
     if _neo4j_client is None:
         with _client_lock:
             if _neo4j_client is None:
-                import os
-
                 schema_uri = os.getenv("A20_NEO4J_SCHEMA_URI")
                 schema_user = os.getenv("A20_NEO4J_SCHEMA_USER")
                 schema_password = os.getenv("A20_NEO4J_SCHEMA_PASSWORD")
@@ -325,6 +334,12 @@ def get_neo4j_client() -> Neo4jClient:
 
 async def close_neo4j_client() -> None:
     """Close the global Neo4j client instance."""
+    import os
+    if os.getenv("A20_NEO4J_MOCK") == "1":
+        from neo4j_client.mock_client import close_mock_client as _close_mock
+        _close_mock()
+        return
+
     global _neo4j_client
     with _client_lock:
         if _neo4j_client:

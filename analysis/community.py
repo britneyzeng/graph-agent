@@ -1,5 +1,7 @@
 """GDS community detection — Louvain multi-resolution, WCC."""
 
+from __future__ import annotations
+
 import logging
 from typing import Any
 

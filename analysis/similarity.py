@@ -1,5 +1,7 @@
 """GDS node similarity — Jaccard-based neighbor similarity."""
 
+from __future__ import annotations
+
 import logging
 from typing import Any
 

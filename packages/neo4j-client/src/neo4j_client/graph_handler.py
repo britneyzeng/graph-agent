@@ -4,6 +4,8 @@ This module provides utility functions for converting Neo4j query results
 into a graph structure format similar to KGraphClient output.
 """
 
+from __future__ import annotations
+
 from typing import Any
 
 

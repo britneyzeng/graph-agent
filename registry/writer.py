@@ -1,16 +1,17 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
-from openpyxl.utils import get_column_letter
 
 from registry.models import (
-    ColumnDef,
     DomainDef,
+    EntityDef,
+    PropertyDef,
     RegistryData,
     RelationshipDef,
-    TableDef,
 )
 
 HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
@@ -25,8 +26,8 @@ class RegistryWriter:
         wb = Workbook()
 
         self._write_domains(wb, data.domains)
-        self._write_tables(wb, data.tables)
-        self._write_columns(wb, data.columns)
+        self._write_entities(wb, data.entities)
+        self._write_properties(wb, data.properties)
         self._write_relationships(wb, data.relationships)
 
         wb.save(self.xlsx_path)
@@ -40,77 +41,74 @@ class RegistryWriter:
         ws.freeze_panes = "A2"
 
     @staticmethod
-    def _to_csv(values: list[str]) -> str:
-        return ",".join(values)
+    def _to_json(val) -> str:
+        return json.dumps(val, ensure_ascii=False) if val else ""
 
     @staticmethod
     def _to_bool(val: bool) -> str:
         return "true" if val else "false"
 
-    @staticmethod
-    def _to_json(val: dict) -> str:
-        return json.dumps(val, ensure_ascii=False) if val else ""
-
     def _write_domains(self, wb: Workbook, domains: list[DomainDef]):
         ws = wb.active
         ws.title = "Domain"
-        self._write_header(ws, ["code", "name", "parent_code", "description", "source"])
+        self._write_header(ws, ["code", "name_cn", "name_en", "parent_code", "description", "source", "status"])
         for d in domains:
             ws.append(
-                [d.code, d.name, d.parent_code or "", d.description, d.source]
+                [d.code, d.name_cn, d.name_en or "", d.parent_code or "", d.description, d.source, d.status]
             )
 
-    def _write_tables(self, wb: Workbook, tables: list[TableDef]):
-        ws = wb.create_sheet("Table")
+    def _write_entities(self, wb: Workbook, entities: list[EntityDef]):
+        ws = wb.create_sheet("Entity")
         self._write_header(
-            ws, ["fqn", "schema_name", "table_name", "type", "business_object", "domains", "comment", "status"]
+            ws, ["fqn", "entity_type", "name_cn", "name_en", "src_tables", "domains", "description", "source", "status"]
         )
-        for t in tables:
+        for e in entities:
             ws.append(
                 [
-                    t.fqn,
-                    t.schema_name,
-                    t.table_name,
-                    t.type,
-                    t.business_object,
-                    self._to_csv(t.domains),
-                    t.comment,
-                    t.status,
+                    e.fqn,
+                    e.entity_type,
+                    e.name_cn,
+                    e.name_en,
+                    self._to_json(e.src_tables),
+                    self._to_json(e.domains),
+                    e.description,
+                    e.source,
+                    e.status,
                 ]
             )
 
-    def _write_columns(self, wb: Workbook, columns: list[ColumnDef]):
-        ws = wb.create_sheet("Column")
+    def _write_properties(self, wb: Workbook, properties: list[PropertyDef]):
+        ws = wb.create_sheet("Property")
         self._write_header(
             ws,
             [
                 "fqn",
-                "table_fqn",
-                "name",
+                "entity_fqn",
                 "data_type",
-                "nullable",
                 "is_pk",
                 "is_fk",
-                "ref_column_fqn",
-                "semantic_type",
-                "domains",
-                "comment",
+                "ref_property_fqn",
+                "description",
+                "name_cn",
+                "name_en",
+                "source",
+                "status",
             ],
         )
-        for c in columns:
+        for p in properties:
             ws.append(
                 [
-                    c.fqn,
-                    c.table_fqn,
-                    c.name,
-                    c.data_type,
-                    self._to_bool(c.nullable),
-                    self._to_bool(c.is_pk),
-                    self._to_bool(c.is_fk),
-                    c.ref_column_fqn or "",
-                    c.semantic_type,
-                    self._to_csv(c.domains),
-                    c.comment,
+                    p.fqn,
+                    p.entity_fqn,
+                    p.data_type,
+                    self._to_bool(p.is_pk),
+                    self._to_bool(p.is_fk),
+                    p.ref_property_fqn or "",
+                    p.description,
+                    p.name_cn,
+                    p.name_en,
+                    p.source,
+                    p.status,
                 ]
             )
 
@@ -121,10 +119,8 @@ class RegistryWriter:
             [
                 "src_fqn",
                 "dst_fqn",
-                "node_level",
                 "rel_type",
                 "is_directed",
-                "properties",
                 "source",
                 "status",
             ],
@@ -134,10 +130,8 @@ class RegistryWriter:
                 [
                     r.src_fqn,
                     r.dst_fqn,
-                    r.node_level,
                     r.rel_type,
                     self._to_bool(r.is_directed),
-                    self._to_json(r.properties),
                     r.source,
                     r.status,
                 ]
@@ -153,10 +147,8 @@ class RegistryWriter:
                 [
                     r.src_fqn,
                     r.dst_fqn,
-                    r.node_level,
                     r.rel_type,
                     self._to_bool(r.is_directed),
-                    self._to_json(r.properties),
                     r.source,
                     r.status,
                 ]

@@ -1,50 +1,57 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
 @dataclass
 class DomainDef:
     code: str
-    name: str
+    name_cn: str
+    name_en: str = ""
     parent_code: str | None = None
     description: str = ""
     source: str = "manual"
-
-
-@dataclass
-class TableDef:
-    fqn: str
-    schema_name: str
-    table_name: str
-    type: str = "table"
-    business_object: str = ""
-    domains: list[str] = field(default_factory=list)
-    comment: str = ""
     status: str = "active"
 
 
 @dataclass
-class ColumnDef:
+class EntityDef:
     fqn: str
-    table_fqn: str
-    name: str
+    entity_type: str
+    name_cn: str = ""
+    name_en: str = ""
+    src_tables: list[str] = field(default_factory=list)
+    domains: list[str] = field(default_factory=list)
+    description: str = ""
+    source: str = "manual"
+    status: str = "active"
+
+
+@dataclass
+class PropertyDef:
+    fqn: str
+    entity_fqn: str
     data_type: str
-    nullable: bool = True
     is_pk: bool = False
     is_fk: bool = False
-    ref_column_fqn: str | None = None
-    semantic_type: str = ""
-    domains: list[str] = field(default_factory=list)
-    comment: str = ""
+    ref_property_fqn: str | None = None
+    description: str = ""
+    name_cn: str = ""
+    name_en: str = ""
+    source: str = "manual"
+    status: str = "active"
+
+    @property
+    def name(self) -> str:
+        return self.fqn.rsplit(".", 1)[-1]
 
 
 @dataclass
 class RelationshipDef:
     src_fqn: str
     dst_fqn: str
-    node_level: str = "column"
     rel_type: str = "REFERENCES"
     is_directed: bool = True
-    properties: dict = field(default_factory=dict)
     source: str = "introspect"
     status: str = "active"
 
@@ -52,6 +59,6 @@ class RelationshipDef:
 @dataclass
 class RegistryData:
     domains: list[DomainDef] = field(default_factory=list)
-    tables: list[TableDef] = field(default_factory=list)
-    columns: list[ColumnDef] = field(default_factory=list)
+    entities: list[EntityDef] = field(default_factory=list)
+    properties: list[PropertyDef] = field(default_factory=list)
     relationships: list[RelationshipDef] = field(default_factory=list)

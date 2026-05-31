@@ -3,6 +3,8 @@
 This tool queries properties of a specific entity type from Neo4j schema database.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -46,10 +48,12 @@ TOOL = {
 
 
 def _sanitize_identifier(name: str) -> bool:
-    """Check if identifier is safe (only alphanumeric and underscore)."""
+    """Check if identifier is safe for backtick-quoted Cypher use."""
     if not name or not isinstance(name, str):
         return False
-    return name.replace("_", "").isalnum()
+    if "`" in name:
+        return False
+    return True
 
 
 def _validate_entity_type(entity_type: str) -> dict[str, Any] | None:
@@ -119,11 +123,11 @@ async def _fetch_entity_cn_names(
     Returns:
         Dictionary mapping property names to their Chinese names (if available)
     """
-    # Try to get a sample node to extract property CN names
+    # Try to get a sample node to extract Chinese name
     try:
         rows = await client.execute_schema(
             f"""
-            MATCH (n:{entity_type})
+            MATCH (n:`{entity_type}`)
             RETURN n
             LIMIT 1
             """
@@ -136,15 +140,13 @@ async def _fetch_entity_cn_names(
         if not node_data:
             return {}
 
-        # Extract properties that end with _cn (Chinese name properties)
-        cn_names: dict[str, str | None] = {}
         properties = node_data if isinstance(node_data, dict) else dict(node_data)
 
-        # Common mapping: property_name -> property_name_cn
+        # Collect all properties ending with _cn (Chinese metadata)
+        cn_names: dict[str, str | None] = {}
         for prop_name in properties:
-            if prop_name.endswith("name_cn"):
-                # This is a Chinese name property
-                cn_names[prop_name] = properties.get(prop_name)
+            if prop_name.endswith("_cn"):
+                cn_names[prop_name] = str(properties.get(prop_name) or "")
 
         return cn_names
 
@@ -214,8 +216,11 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             prop_info = {
                 "name": prop_name,
                 "type": prop_type,
-                # "name_cn": cn_names.get(prop_name),
             }
+            # If this property has a _cn counterpart, include it
+            cn_key = f"{prop_name}_cn"
+            if cn_key in cn_names:
+                prop_info["name_cn"] = cn_names[cn_key]
             props_with_cn.append(prop_info)
 
         yield json.dumps(
