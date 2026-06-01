@@ -20,6 +20,12 @@ from tools.insight_tools.graph_insight import TOOL as GRAPH_INSIGHT_TOOL
 from tools.insight_tools.graph_insight import execute as graph_insight_execute
 from tools.insight_tools.risk_check import TOOL as RISK_CHECK_INSIGHT_TOOL
 from tools.insight_tools.risk_check import execute as risk_check_insight_execute
+from tools.query_schema_data import TOOL as QUERY_SCHEMA_DATA_TOOL
+from tools.query_schema_data import execute as query_schema_data_execute
+from tools.query_schema_props import TOOL as QUERY_SCHEMA_PROPS_TOOL
+from tools.query_schema_props import execute as query_schema_props_execute
+from tools.query_schema_rels import TOOL as QUERY_SCHEMA_RELS_TOOL
+from tools.query_schema_rels import execute as query_schema_rels_execute
 from tools.query_tools.join_path_find import TOOL as JOIN_PATH_FIND_TOOL
 from tools.query_tools.join_path_find import execute as join_path_find_execute
 from tools.query_tools.lineage_trace import TOOL as LINEAGE_TRACE_TOOL
@@ -60,11 +66,16 @@ def create_service() -> ServiceApp:
     service.add_tool(**JOIN_PATH_FIND_TOOL, handler=join_path_find_execute)
     service.add_tool(**SQL_EXECUTOR_TOOL, handler=sql_executor_execute)
 
+    # Register schema query tools
+    service.add_tool(**QUERY_SCHEMA_DATA_TOOL, handler=query_schema_data_execute)
+    service.add_tool(**QUERY_SCHEMA_PROPS_TOOL, handler=query_schema_props_execute)
+    service.add_tool(**QUERY_SCHEMA_RELS_TOOL, handler=query_schema_rels_execute)
+
     # Register insight tools
     service.add_tool(**RISK_CHECK_INSIGHT_TOOL, handler=risk_check_insight_execute)
     service.add_tool(**GRAPH_INSIGHT_TOOL, handler=graph_insight_execute)
 
-    logger.info("All 7 tools registered successfully")
+    logger.info("All 10 tools registered successfully")
     return service
 
 

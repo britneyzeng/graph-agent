@@ -41,9 +41,9 @@ def main():
     logger.info("Read %d Domain nodes", len(domains))
 
     entities = client.execute(
-        "MATCH (n:Dataset) WHERE n.entity_type IS NOT NULL RETURN n.* ORDER BY n.fqn"
+        "MATCH (n:Entity) WHERE n.entity_type IS NOT NULL RETURN n.* ORDER BY n.fqn"
     )
-    logger.info("Read %d Dataset nodes", len(entities))
+    logger.info("Read %d Entity nodes", len(entities))
 
     fields = client.execute("MATCH (c:Field) RETURN c.* ORDER BY c.fqn")
     logger.info("Read %d Field nodes", len(fields))

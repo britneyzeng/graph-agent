@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from neo4j_client import Neo4jClientError, get_neo4j_client
+from kuzu_client import KuzuClientError, get_kuzu_client
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -36,31 +36,31 @@ async def _search(client: Any, keyword: str, domain: str | None) -> list[dict]:
     if domain:
         domain = _sanitize(domain)
         rows = await client.execute_schema(
-            """
-            MATCH (t:Table)
-            WHERE (t.name CONTAINS $kw OR t.comment CONTAINS $kw)
-              AND $domain IN t.domains
-            OPTIONAL MATCH (t)-[:HAS_COLUMN]->(c:Column)
-            WHERE c.name CONTAINS $kw OR c.comment CONTAINS $kw
-            RETURN t.fqn AS table_fqn, t.name AS table_name, t.comment AS table_comment,
-                   t.domains AS table_domains,
-                   collect(DISTINCT {fqn: c.fqn, name: c.name, comment: c.comment, domains: c.domains}) AS columns
-            """,
-            {"kw": keyword, "domain": domain},
-        )
+                """
+                MATCH (t:Entity)
+                WHERE (t.name CONTAINS $kw OR t.comment CONTAINS $kw)
+                  AND $domain IN t.domains
+                OPTIONAL MATCH (t)-[:HAS_PROPERTY]->(c:Field)
+                WHERE c.name CONTAINS $kw OR c.comment CONTAINS $kw
+                RETURN t.fqn AS table_fqn, t.name AS table_name, t.comment AS table_comment,
+                       t.domains AS table_domains,
+                       collect(DISTINCT {fqn: c.fqn, name: c.name, comment: c.comment, domains: c.domains}) AS columns
+                """,
+                {"kw": keyword, "domain": domain},
+            )
     else:
         rows = await client.execute_schema(
-            """
-            MATCH (t:Table)
-            WHERE t.name CONTAINS $kw OR t.comment CONTAINS $kw
-            OPTIONAL MATCH (t)-[:HAS_COLUMN]->(c:Column)
-            WHERE c.name CONTAINS $kw OR c.comment CONTAINS $kw
-            RETURN t.fqn AS table_fqn, t.name AS table_name, t.comment AS table_comment,
-                   t.domains AS table_domains,
-                   collect(DISTINCT {fqn: c.fqn, name: c.name, comment: c.comment, domains: c.domains}) AS columns
-            """,
-            {"kw": keyword},
-        )
+                """
+                MATCH (t:Entity)
+                WHERE t.name CONTAINS $kw OR t.comment CONTAINS $kw
+                OPTIONAL MATCH (t)-[:HAS_PROPERTY]->(c:Field)
+                WHERE c.name CONTAINS $kw OR c.comment CONTAINS $kw
+                RETURN t.fqn AS table_fqn, t.name AS table_name, t.comment AS table_comment,
+                       t.domains AS table_domains,
+                       collect(DISTINCT {fqn: c.fqn, name: c.name, comment: c.comment, domains: c.domains}) AS columns
+                """,
+                {"kw": keyword},
+            )
     return [
         {
             "table_fqn": r["table_fqn"],
@@ -87,7 +87,7 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-        client = get_neo4j_client()
+        client = get_kuzu_client()
         results = await _search(client, keyword, domain)
 
         yield json.dumps(
@@ -103,8 +103,8 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-    except Neo4jClientError as e:
-        logger.exception("Neo4j error")
+    except KuzuClientError as e:
+        logger.exception("Kuzu error")
         yield json.dumps({"success": False, "error": f"Database error: {e}"}, ensure_ascii=False)
     except Exception as e:
         logger.exception("Schema search error")

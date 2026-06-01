@@ -2,7 +2,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 
-from neo4j_client import Neo4jClientError, get_neo4j_client
+from kuzu_client import KuzuClientError, get_kuzu_client
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -41,26 +41,40 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-        client = get_neo4j_client()
+        client = get_kuzu_client()
 
         query = """
-            MATCH (a:Table {fqn: $a_fqn}), (b:Table {fqn: $b_fqn})
-            MATCH path = shortestPath(
-                (a)-[:HAS_COLUMN]->(:Column)-[:REFERENCES|JOINS_WITH*1..$max_hops]-(:Column)<-[:HAS_COLUMN]-(b)
-            )
-            RETURN [n IN nodes(path) | labels(n)[0] + ":" + n.fqn] AS node_path,
-                   [r IN relationships(path) | type(r)] AS rel_path,
+            MATCH (a:Entity {fqn: $a_fqn}), (b:Entity {fqn: $b_fqn})
+            MATCH path = SHORTEST 1
+                (a)-[:HAS_PROPERTY]->(:Field)-[:REFERENCES|JOINS_WITH*1..$max_hops]-(:Field)<-[:HAS_PROPERTY]-(b)
+            RETURN nodes(path) AS node_path,
+                   relationships(path) AS rel_path,
                    length(path) AS hops
         """
         rows = await client.execute_schema(query, {"a_fqn": table_a, "b_fqn": table_b, "max_hops": max_hops})
 
         paths = []
         for r in rows:
+            raw_path = r.get("node_path", [])
+            node_path = []
+            for n in raw_path:
+                if isinstance(n, dict):
+                    label = n.get("_label", n.get("entity_type", ""))
+                    node_path.append(f"{label}:{n.get('fqn', '')}")
+                else:
+                    node_path.append(str(n))
+            raw_rels = r.get("rel_path", [])
+            rel_path = []
+            for rel in raw_rels:
+                if isinstance(rel, dict):
+                    rel_path.append(rel.get("_label", ""))
+                else:
+                    rel_path.append(str(rel))
             paths.append(
                 {
                     "hops": r.get("hops", 0),
-                    "node_path": r.get("node_path", []),
-                    "rel_path": r.get("rel_path", []),
+                    "node_path": node_path,
+                    "rel_path": rel_path,
                 }
             )
 
@@ -84,8 +98,8 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-    except Neo4jClientError as e:
-        logger.exception("Neo4j error")
+    except KuzuClientError as e:
+        logger.exception("Kuzu error")
         yield json.dumps({"success": False, "error": f"Database error: {e}"}, ensure_ascii=False)
     except Exception as e:
         logger.exception("Join path find error")

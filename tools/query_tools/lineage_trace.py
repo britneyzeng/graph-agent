@@ -2,7 +2,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 
-from neo4j_client import Neo4jClientError, get_neo4j_client
+from kuzu_client import KuzuClientError, get_kuzu_client
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -41,14 +41,14 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-        client = get_neo4j_client()
+        client = get_kuzu_client()
 
         rel_pattern = "<-[:DERIVES_FROM]-" if direction == "upstream" else "-[:DERIVES_FROM]->"
         query = f"""
-            MATCH path = (start:Column {{fqn: $fqn}}){rel_pattern}(related:Column)
+            MATCH path = (start:Field {{fqn: $fqn}}){rel_pattern}(related:Field)
             WHERE length(path) <= $max_depth
-            RETURN [n IN nodes(path) | n.fqn] AS fqn_path,
-                   [r IN relationships(path) | type(r)] AS rel_path,
+            RETURN nodes(path) AS fqn_path,
+                   relationships(path) AS rel_path,
                    length(path) AS depth
             ORDER BY depth
         """
@@ -57,10 +57,13 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
         paths = []
         visited_fqns = {column_fqn}
         for r in rows:
-            fqn_path = r.get("fqn_path", [])
+            raw_path = r.get("fqn_path", [])
+            fqn_path = [n.get("fqn", str(n)) if isinstance(n, dict) else str(n) for n in raw_path] if isinstance(raw_path, list) else []
+            raw_rels = r.get("rel_path", [])
+            rels = [rel if isinstance(rel, str) else (rel.get("_label", "") if isinstance(rel, dict) else "") for rel in raw_rels] if isinstance(raw_rels, list) else []
             paths.append({
                 "path": fqn_path,
-                "rels": r.get("rel_path", [""])[0] if r.get("rel_path") else "",
+                "rels": rels[0] if rels else "",
                 "depth": r.get("depth", 0),
             })
             for f in fqn_path:
@@ -80,8 +83,8 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-    except Neo4jClientError as e:
-        logger.exception("Neo4j error")
+    except KuzuClientError as e:
+        logger.exception("Kuzu error")
         yield json.dumps({"success": False, "error": f"Database error: {e}"}, ensure_ascii=False)
     except Exception as e:
         logger.exception("Lineage trace error")

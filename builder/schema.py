@@ -5,7 +5,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-NT = "Dataset"
+NT = "Entity"
 NP = "Field"
 
 _DDL_STATEMENTS: list[str] = [

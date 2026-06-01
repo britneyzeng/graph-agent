@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 
-from neo4j_client import Neo4jClientError, get_neo4j_client
+from kuzu_client import KuzuClientError, get_kuzu_client
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -35,11 +35,11 @@ RULES = {
         "name": "Orphan Foreign Key",
         "zh": "外键无对应主表",
         "query": """
-            MATCH (fk:Column)
-            WHERE fk.is_fk = true AND (fk.ref_column_fqn IS NULL OR fk.ref_column_fqn = '')
+            MATCH (fk:Field)
+            WHERE fk.is_fk = true AND (fk.ref_property_fqn IS NULL OR fk.ref_property_fqn = '')
             {domain_filter}
             RETURN fk.fqn AS col_fqn, fk.name AS col_name,
-                   'is_fk=true but ref_column_fqn is empty' AS detail
+                   'is_fk=true but ref_property_fqn is empty' AS detail
         """,
         "domain_var": "fk",
     },
@@ -47,7 +47,7 @@ RULES = {
         "name": "Cross-Domain Reference",
         "zh": "跨领域外键引用",
         "query": """
-            MATCH (c1:Column)-[:REFERENCES]->(c2:Column)
+            MATCH (c1:Field)-[:REFERENCES]->(c2:Field)
             WHERE c1.domains <> c2.domains
             {domain_filter}
             RETURN c1.fqn AS col_fqn, c2.fqn AS ref_col_fqn,
@@ -60,8 +60,8 @@ RULES = {
         "name": "Table Without Primary Key",
         "zh": "表缺少主键",
         "query": """
-            MATCH (t:Table)
-            OPTIONAL MATCH (t)-[:HAS_COLUMN]->(pk:Column {is_pk: true})
+            MATCH (t:Entity)
+            OPTIONAL MATCH (t)-[:HAS_PROPERTY]->(pk:Field {is_pk: true})
             WITH t, collect(pk) AS pks
             WHERE size(pks) = 0
             {domain_filter}
@@ -78,7 +78,7 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
     domain = args.get("domain")
 
     try:
-        client = get_neo4j_client()
+        client = get_kuzu_client()
 
         check_types = list(RULES.keys()) if check_type == "all" else [check_type]
         issues = []
@@ -127,8 +127,8 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-    except Neo4jClientError as e:
-        logger.exception("Neo4j error")
+    except KuzuClientError as e:
+        logger.exception("Kuzu error")
         yield json.dumps({"success": False, "error": f"Database error: {e}"}, ensure_ascii=False)
     except Exception as e:
         logger.exception("Risk check error")

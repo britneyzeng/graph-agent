@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 
-from neo4j_client import Neo4jClientError, get_neo4j_client
+from kuzu_client import KuzuClientError, get_kuzu_client
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
     top_k = min(args.get("top_k", 20), 100)
 
     try:
-        client = get_neo4j_client()
+        client = get_kuzu_client()
 
         if insight_type == "summary":
             yield await _summary(client, domain)
@@ -48,8 +48,8 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
         else:
             yield await _centrality(client, domain, top_k)
 
-    except Neo4jClientError as e:
-        logger.exception("Neo4j error")
+    except KuzuClientError as e:
+        logger.exception("Kuzu error")
         yield json.dumps({"success": False, "error": f"Database error: {e}"}, ensure_ascii=False)
     except Exception as e:
         logger.exception("Graph insight error")
@@ -57,7 +57,7 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
 
 
 async def _centrality(client, domain, top_k):
-    label = "Column"
+    label = "Field"
     domain_filter = f"WHERE '{domain}' IN c.domains " if domain else ""
 
     query = f"""
@@ -66,7 +66,7 @@ async def _centrality(client, domain, top_k):
         RETURN c.fqn AS fqn, c.name AS name,
                c.pagerank AS pagerank,
                c.betweenness AS betweenness
-        ORDER BY coalesce(c.pagerank, 0) DESC
+        ORDER BY c.pagerank DESC
         LIMIT {top_k}
     """
     rows = await client.execute_schema(query)
@@ -82,24 +82,24 @@ async def _centrality(client, domain, top_k):
 
 
 async def _community(client, domain, top_k):
-    label = "Table"
+    label = "Entity"
     domain_filter = f"WHERE '{domain}' IN t.domains " if domain else ""
 
     query = f"""
         MATCH (t:{label})
         {domain_filter}
         RETURN t.community_id AS community_id,
-               count(*) AS table_count,
-               collect(t.name)[0..10] AS sample_tables
-        ORDER BY table_count DESC
+               count(*) AS entity_count,
+               collect(t.name)[0..10] AS sample_entities
+        ORDER BY entity_count DESC
         LIMIT {top_k}
     """
     rows = await client.execute_schema(query)
     communities = [
         {
             "community_id": r.get("community_id"),
-            "table_count": r.get("table_count", 0),
-            "sample_tables": r.get("sample_tables", []),
+            "entity_count": r.get("entity_count", 0),
+            "sample_entities": r.get("sample_entities", []),
         }
         for r in rows
         if r.get("community_id") is not None
@@ -112,14 +112,14 @@ async def _community(client, domain, top_k):
 
 
 async def _summary(client, domain):
-    parts = ["MATCH (t:Table) RETURN count(*) AS table_count"]
+    parts = ["MATCH (t:Entity) RETURN count(*) AS entity_count"]
     if domain:
-        parts = [f"MATCH (t:Table) WHERE '{domain}' IN t.domains RETURN count(*) AS table_count"]
+        parts = [f"MATCH (t:Entity) WHERE '{domain}' IN t.domains RETURN count(*) AS entity_count"]
 
     rows = await client.execute_schema(parts[0])
-    table_count = rows[0]["table_count"] if rows else 0
+    entity_count = rows[0]["entity_count"] if rows else 0
 
-    col_query = "MATCH (c:Column) RETURN count(*) AS col_count"
+    col_query = "MATCH (c:Field) RETURN count(*) AS col_count"
     rows = await client.execute_schema(col_query)
     col_count = rows[0]["col_count"] if rows else 0
 
@@ -133,7 +133,7 @@ async def _summary(client, domain):
             "data": {
                 "insight_type": "summary",
                 "domain": domain,
-                "table_count": table_count,
+                "entity_count": entity_count,
                 "column_count": col_count,
                 "relationship_count": rel_count,
             },

@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from neo4j_client import Neo4jClientError, get_neo4j_client
+from kuzu_client import KuzuClientError, get_kuzu_client
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -46,14 +46,14 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-        client = get_neo4j_client()
+        client = get_kuzu_client()
 
         domain = _sanitize(domain)
 
         nodes_query = """
-            MATCH (c:Column)
+            MATCH (c:Field)
             WHERE $domain IN c.domains
-            MATCH (t:Table)-[:HAS_COLUMN]->(c)
+            MATCH (t:Entity)-[:HAS_PROPERTY]->(c)
             RETURN DISTINCT
                 t.fqn AS table_fqn, t.name AS table_name, t.comment AS table_comment,
                 c.fqn AS col_fqn, c.name AS col_name, c.data_type AS col_type,
@@ -87,9 +87,9 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
 
         if include_rels:
             rels_query = """
-                MATCH (c1:Column)
+                MATCH (c1:Field)
                 WHERE $domain IN c1.domains
-                MATCH (c1)-[r]-(c2:Column)
+                MATCH (c1)-[r]-(c2:Field)
                 WHERE $domain IN c2.domains
                 RETURN DISTINCT
                     c1.fqn AS src_fqn, c2.fqn AS dst_fqn,
@@ -122,8 +122,8 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-    except Neo4jClientError as e:
-        logger.exception("Neo4j error")
+    except KuzuClientError as e:
+        logger.exception("Kuzu error")
         yield json.dumps({"success": False, "error": f"Database error: {e}"}, ensure_ascii=False)
     except Exception as e:
         logger.exception("Subgraph fetch error")
