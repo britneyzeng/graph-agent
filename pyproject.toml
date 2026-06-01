@@ -6,16 +6,17 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "mh-service-kit>=0.1.0b2",
-    "neo4j-client",
+    "kuzu-client",
     "pg-client",
     "minimal-harness>=0.6.1b4",
     "openpyxl>=3.1",
     "python-dotenv>=1.0",
     "sqlglot>=25.0",
+    "networkx>=3.0",
 ]
 
 [tool.uv.sources]
-neo4j-client = { path = "packages/neo4j-client", editable = true }
+kuzu-client = { path = "packages/kuzu-client", editable = true }
 pg-client = { path = "packages/pg-client", editable = true }
 
 [tool.uv]
@@ -73,7 +74,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["hw_api_client", "neo4j_client", "pg_client", "unisearch", "tools"]
+known-first-party = ["hw_api_client", "kuzu_client", "pg_client", "unisearch", "tools"]
 
 [tool.pyright]
 pythonVersion = "3.12"
@@ -88,7 +89,7 @@ exclude = [
 ]
 extraPaths = [
     "packages/hw-api-client/src",
-    "packages/neo4j-client/src",
+    "packages/kuzu-client/src",
     "packages/pg-client/src",
     "packages/unisearch/src",
 ]
