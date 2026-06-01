@@ -1,6 +1,6 @@
-"""Query schema properties tool for Neo4j graph database.
+"""Query schema properties tool for Kuzu graph database.
 
-This tool queries properties of a specific entity type from Neo4j schema database.
+This tool queries properties of a specific entity type from Kuzu schema database.
 """
 
 import json
@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from neo4j_client import Neo4jClientError, get_neo4j_client
+from kuzu_client import KuzuClientError, get_kuzu_client
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ class QuerySchemaPropsParams(BaseModel):
     """Parameters for query_schema_props tool."""
 
     entity_type: str = Field(
-        description="Entity type (label) to query properties for. Must be a valid Neo4j node label."
+        description="Entity type (label) to query properties for. Must be a valid Kuzu node table name."
     )
 
 
@@ -32,13 +32,13 @@ TOOL = {
     "display_name": "Query Schema Properties",
     "display_name_locale": {"zh": "查询图谱实体属性"},
     "description": (
-        "Query properties of a specific entity type from Neo4j graph schema database. "
+        "Query properties of a specific entity type from Kuzu graph schema database. "
         "Returns property names, types, and optionally Chinese names if available. "
         "Maximum 50 properties."
     ),
     "description_locale": {
         "zh": (
-            "从Neo4j图数据库查询指定实体类型下的所有属性信息，最多返回50个属性。"
+            "从Kuzu图数据库查询指定实体类型下的所有属性信息，最多返回50个属性。"
             "返回属性名称、类型，以及可选的中文名称（如存在）。"
         )
     },
@@ -71,91 +71,40 @@ async def _fetch_entity_properties(
     client: Any,
     entity_type: str,
 ) -> dict[str, str]:
-    """Query properties of a specific entity type from Neo4j schema.
+    """Query properties of a specific entity type from Kuzu schema.
 
     Args:
-        client: Neo4j client instance
+        client: Kuzu client instance
         entity_type: Entity type (label) to query
 
     Returns:
         Dictionary with property name and type mapping (max 50 properties)
     """
-    # Query node type properties using Neo4j's schema procedure
+    # Query Field nodes connected to entities of this type via HAS_PROPERTY
     rows = await client.execute_schema(
         """
-        CALL db.schema.nodeTypeProperties()
-        YIELD nodeType, propertyName, propertyTypes
-        RETURN *
-        """
+        MATCH (e:Entity)-[:HAS_PROPERTY]->(c:Field)
+        WHERE e.entity_type = $type
+        RETURN DISTINCT c.name AS name, c.data_type AS type
+        ORDER BY name
+        """,
+        {"type": entity_type},
     )
 
     properties: dict[str, str] = {}
     for row in rows:
-        node_type = row.get("nodeType")
-        # nodeType format is like ":Label" or "`Label`"
-        label = node_type.replace(":", "").replace("`", "") if node_type else ""
-        prop_name = row.get("propertyName")
-        prop_types = row.get("propertyTypes")
-
-        if label == entity_type and prop_name and prop_types:
-            prop_type = prop_types[0] if isinstance(prop_types, list) and prop_types else "unknown"
+        prop_name = row.get("name")
+        prop_type = row.get("type")
+        if prop_name and prop_type:
             properties[prop_name] = prop_type
-            # Stop when we reach the limit
             if len(properties) >= MAX_RESULTS:
                 break
 
     return properties
 
 
-async def _fetch_entity_cn_names(
-    client: Any,
-    entity_type: str,
-) -> dict[str, str | None]:
-    """Query Chinese names for properties of a specific entity type.
-
-    Args:
-        client: Neo4j client instance
-        entity_type: Entity type (label) to query
-
-    Returns:
-        Dictionary mapping property names to their Chinese names (if available)
-    """
-    # Try to get a sample node to extract property CN names
-    try:
-        rows = await client.execute_schema(
-            f"""
-            MATCH (n:{entity_type})
-            RETURN n
-            LIMIT 1
-            """
-        )
-
-        if not rows:
-            return {}
-
-        node_data = rows[0].get("n")
-        if not node_data:
-            return {}
-
-        # Extract properties that end with _cn (Chinese name properties)
-        cn_names: dict[str, str | None] = {}
-        properties = node_data if isinstance(node_data, dict) else dict(node_data)
-
-        # Common mapping: property_name -> property_name_cn
-        for prop_name in properties:
-            if prop_name.endswith("name_cn"):
-                # This is a Chinese name property
-                cn_names[prop_name] = properties.get(prop_name)
-
-        return cn_names
-
-    except Exception as e:
-        logger.warning("Failed to fetch CN names for entity_type %s: %s", entity_type, e)
-        return {}
-
-
 async def execute(args: dict) -> AsyncGenerator[str, None]:
-    """Query properties of a specific entity type from Neo4j graph schema.
+    """Query properties of a specific entity type from Kuzu graph schema.
 
     Args:
         args: Dictionary containing:
@@ -178,7 +127,7 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             yield json.dumps(error, ensure_ascii=False)
             return
 
-        client = get_neo4j_client()
+        client = get_kuzu_client()
 
         # Fetch properties (limited to 50)
         properties = await _fetch_entity_properties(client, entity_type)
@@ -206,16 +155,12 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-        # Try to get Chinese names for properties
-        cn_names = await _fetch_entity_cn_names(client, entity_type)
-
         # Build properties output with CN names
         props_with_cn: list[dict[str, Any]] = []
         for prop_name, prop_type in properties.items():
             prop_info = {
                 "name": prop_name,
                 "type": prop_type,
-                # "name_cn": cn_names.get(prop_name),
             }
             props_with_cn.append(prop_info)
 
@@ -232,11 +177,11 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-    except Neo4jClientError as e:
-        logger.exception("Neo4j client error: %s", e)
+    except KuzuClientError as e:
+        logger.exception("Kuzu client error: %s", e)
         yield json.dumps({"success": False, "error": f"数据库连接错误: {e}"}, ensure_ascii=False)
     except Exception as e:
-        logger.exception("查询Neo4j实体属性异常: %s", e)
+        logger.exception("查询Kuzu实体属性异常: %s", e)
         yield json.dumps(
             {"success": False, "error": f"查询实体属性异常: {str(e)}"}, ensure_ascii=False
         )
