@@ -1,4 +1,4 @@
-"""Run GDS graph analysis and write results back to registry.
+"""Run graph analysis (PageRank, Louvain, similarity) and write results to Kuzu.
 
 Usage:
     python -m scripts.run_analysis --algo centrality --xlsx registry/manual_registry.xlsx
@@ -13,12 +13,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("run_analysis")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run GDS graph analysis")
+    parser = argparse.ArgumentParser(description="Run graph analysis (networkx + Kuzu)")
     parser.add_argument("--algo", choices=["centrality", "louvain", "similarity", "all"], default="all")
     parser.add_argument("--xlsx", "-x", default="registry/manual_registry.xlsx")
     parser.add_argument("--resolution", type=float, default=1.0, help="Louvain resolution (>1 for finer)")

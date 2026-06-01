@@ -1,6 +1,6 @@
-"""Assistant20 Tools - Neo4j Graph Database Query Tools Service.
+"""Assistant20 Tools - Kuzu Graph Database Query Tools Service.
 
-This service provides tools for querying Neo4j graph database
+This service provides tools for querying Kuzu graph database
 and PostgreSQL database, including schema search, subgraph fetch,
 lineage trace, join path discovery, SQL execution, risk check, and graph insights.
 """
@@ -14,7 +14,7 @@ from minimal_harness.client.logging_setup import setup_service_logging
 
 load_dotenv(Path(__file__).parent / ".env")
 
-from neo4j_client import close_neo4j_client
+from kuzu_client import close_kuzu_client, get_kuzu_client
 from pg_client import close_pg_client
 from tools.insight_tools.graph_insight import TOOL as GRAPH_INSIGHT_TOOL
 from tools.insight_tools.graph_insight import execute as graph_insight_execute
@@ -34,6 +34,13 @@ from tools.query_tools.subgraph_fetch import execute as subgraph_fetch_execute
 # Setup logging
 setup_service_logging()
 logger = logging.getLogger(__name__)
+
+# Eagerly initialize Kuzu client on service startup
+try:
+    get_kuzu_client()
+    logger.info("Kuzu client initialized on startup")
+except Exception:
+    logger.warning("Kuzu client initialization on startup failed, will retry on first request")
 
 
 def create_service() -> ServiceApp:
@@ -70,7 +77,7 @@ app = service.build()
 
 async def shutdown() -> None:
     """Shutdown handler to close database client connections."""
-    await close_neo4j_client()
+    await close_kuzu_client()
     await close_pg_client()
     logger.info("All database client connections closed")
 

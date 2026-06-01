@@ -1,147 +1,101 @@
-"""GDS centrality analysis — PageRank, Betweenness, Degree."""
-
 from __future__ import annotations
 
 import logging
 from typing import Any
+
+import networkx as nx
+
+try:
+    from kuzu_client import get_kuzu_client
+except ImportError:
+    get_kuzu_client = None
 
 logger = logging.getLogger(__name__)
 
 
 def _get_client():
     try:
-        from neo4j_client import get_neo4j_client
-
-        return get_neo4j_client()
+        return get_kuzu_client()
     except Exception as e:
-        logger.warning("Neo4j client not available: %s", e)
+        logger.warning("Kuzu client not available: %s", e)
         return None
 
 
+def _build_column_graph(client) -> nx.Graph:
+    G = nx.Graph()
+    rows = client.execute(
+        "MATCH (c:Field) RETURN c.fqn AS fqn"
+    )
+    for r in rows:
+        G.add_node(r["fqn"])
+    rows = client.execute(
+        "MATCH (c1:Field)-[r:REFERENCES|JOINS_WITH]-(c2:Field) "
+        "RETURN c1.fqn AS src, c2.fqn AS dst"
+    )
+    for r in rows:
+        G.add_edge(r["src"], r["dst"])
+    logger.info("Built column graph with %d nodes, %d edges", G.number_of_nodes(), G.number_of_edges())
+    return G
+
+
 def run_pagerank(domain: str | None = None, write_property: str = "pagerank", **kwargs) -> dict[str, Any]:
-    """Project Column graph and run PageRank, writing pagerank scores back."""
     client = _get_client()
     if client is None:
-        return {"status": "skipped", "reason": "Neo4j client unavailable"}
+        return {"status": "skipped", "reason": "Kuzu client unavailable"}
 
-    graph_name = "proc_pagerank"
+    G = _build_column_graph(client)
+    if G.number_of_nodes() == 0:
+        return {"status": "skipped", "reason": "No nodes in graph"}
 
-    node_filter = "Column"
-    rel_filter = "REFERENCES|JOINS_WITH"
-
-    cypher = f"""
-        CALL gds.graph.project.cypher(
-            '{graph_name}',
-            'MATCH (c:Column) RETURN id(c) AS id',
-            'MATCH (c1:Column)-[r:{rel_filter}]-(c2:Column) RETURN id(c1) AS source, id(c2) AS target'
+    pr = nx.pagerank(G, alpha=0.85, max_iter=20)
+    client.execute("BEGIN TRANSACTION")
+    for fqn, score in pr.items():
+        client.execute(
+            f"MATCH (c:Field {{fqn: $fqn}}) SET c.{write_property} = $score",
+            {"fqn": fqn, "score": score},
         )
-        YIELD graphName, nodeCount, relationshipCount
-        RETURN graphName, nodeCount, relationshipCount
-    """
-    try:
-        client.execute_schema(cypher)
-    except Exception as e:
-        if "already exists" in str(e):
-            pass
-        else:
-            logger.error("Graph project failed: %s", e)
-
-    try:
-        rows = client.execute_schema(
-            f"""
-            CALL gds.pageRank.write('{graph_name}', {{
-                writeProperty: '{write_property}',
-                maxIterations: 20,
-                dampingFactor: 0.85
-            }})
-            YIELD nodePropertiesWritten, ranIterations
-            RETURN nodePropertiesWritten, ranIterations
-            """
-        )
-        result = dict(rows[0]) if rows else {}
-        logger.info("PageRank completed: %s", result)
-        return {"status": "ok", "algo": "pagerank", "result": result}
-    except Exception as e:
-        logger.error("PageRank write failed: %s", e)
-        return {"status": "error", "error": str(e)}
+    client.execute("COMMIT")
+    logger.info("PageRank completed for %d nodes", len(pr))
+    return {"status": "ok", "algo": "pagerank", "result": {"nodePropertiesWritten": len(pr), "ranIterations": 20}}
 
 
 def run_betweenness(domain: str | None = None, write_property: str = "betweenness", **kwargs) -> dict[str, Any]:
     client = _get_client()
     if client is None:
-        return {"status": "skipped", "reason": "Neo4j client unavailable"}
+        return {"status": "skipped", "reason": "Kuzu client unavailable"}
 
-    graph_name = "proc_betweenness"
+    G = _build_column_graph(client)
+    if G.number_of_nodes() == 0:
+        return {"status": "skipped", "reason": "No nodes in graph"}
 
-    try:
-        client.execute_schema(
-            f"""
-            CALL gds.graph.project.cypher(
-                '{graph_name}',
-                'MATCH (c:Column) RETURN id(c) AS id',
-                'MATCH (c1:Column)-[r:REFERENCES|JOINS_WITH]-(c2:Column) RETURN id(c1) AS source, id(c2) AS target'
-            )
-            YIELD graphName, nodeCount, relationshipCount
-            RETURN graphName, nodeCount, relationshipCount
-            """
+    bc = nx.betweenness_centrality(G)
+    client.execute("BEGIN TRANSACTION")
+    for fqn, score in bc.items():
+        client.execute(
+            f"MATCH (c:Field {{fqn: $fqn}}) SET c.{write_property} = $score",
+            {"fqn": fqn, "score": score},
         )
-    except Exception:
-        pass
-
-    try:
-        rows = client.execute_schema(
-            f"""
-            CALL gds.betweenness.write('{graph_name}', {{
-                writeProperty: '{write_property}'
-            }})
-            YIELD nodePropertiesWritten
-            RETURN nodePropertiesWritten
-            """
-        )
-        result = dict(rows[0]) if rows else {}
-        logger.info("Betweenness completed: %s", result)
-        return {"status": "ok", "algo": "betweenness", "result": result}
-    except Exception as e:
-        logger.error("Betweenness write failed: %s", e)
-        return {"status": "error", "error": str(e)}
+    client.execute("COMMIT")
+    logger.info("Betweenness completed for %d nodes", len(bc))
+    return {"status": "ok", "algo": "betweenness", "result": {"nodePropertiesWritten": len(bc)}}
 
 
 def run_degree(domain: str | None = None, write_property: str = "degree", **kwargs) -> dict[str, Any]:
     client = _get_client()
     if client is None:
-        return {"status": "skipped", "reason": "Neo4j client unavailable"}
+        return {"status": "skipped", "reason": "Kuzu client unavailable"}
 
-    graph_name = "proc_degree"
+    G = _build_column_graph(client)
+    if G.number_of_nodes() == 0:
+        return {"status": "skipped", "reason": "No nodes in graph"}
 
-    try:
-        client.execute_schema(
-            f"""
-            CALL gds.graph.project.cypher(
-                '{graph_name}',
-                'MATCH (c:Column) RETURN id(c) AS id',
-                'MATCH (c1:Column)-[r:REFERENCES|JOINS_WITH]-(c2:Column) RETURN id(c1) AS source, id(c2) AS target'
-            )
-            YIELD graphName, nodeCount, relationshipCount
-            RETURN graphName, nodeCount, relationshipCount
-            """
+    dc = nx.degree_centrality(G)
+    client.execute("BEGIN TRANSACTION")
+    for fqn, score in dc.items():
+        client.execute(
+            f"MATCH (c:Field {{fqn: $fqn}}) SET c.{write_property} = $score",
+            {"fqn": fqn, "score": score},
         )
-    except Exception:
-        pass
-
-    try:
-        rows = client.execute_schema(
-            f"""
-            CALL gds.degree.write('{graph_name}', {{
-                writeProperty: '{write_property}',
-                orientation: 'UNDIRECTED'
-            }})
-            YIELD nodePropertiesWritten
-            RETURN nodePropertiesWritten
-            """
-        )
-        result = dict(rows[0]) if rows else {}
-        logger.info("Degree completed: %s", result)
-        return {"status": "ok", "algo": "degree", "result": result}
-    except Exception as e:
-        logger.error("Degree write failed: %s", e)
-        return {"status": "error", "error": str(e)}
+    client.execute("COMMIT")
+    logger.info("Degree centrality completed for %d nodes", len(dc))
+    return {"status": "ok", "algo": "degree", "result": {"nodePropertiesWritten": len(dc)}}
