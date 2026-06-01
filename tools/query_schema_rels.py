@@ -1,6 +1,6 @@
-"""Query schema relationships tool for Neo4j graph database.
+"""Query schema relationships tool for Kuzu graph database.
 
-This tool queries relationship patterns between entity types from Neo4j schema database.
+This tool queries relationship patterns between entity types from Kuzu schema database.
 """
 
 import json
@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from neo4j_client import Neo4jClientError, get_neo4j_client
+from kuzu_client import KuzuClientError, get_kuzu_client
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -46,14 +46,14 @@ TOOL = {
     "display_name": "Query Schema Relationships",
     "display_name_locale": {"zh": "查询图谱关系结构"},
     "description": (
-        "Query relationship patterns between entity types from Neo4j graph schema database. "
+        "Query relationship patterns between entity types from Kuzu graph schema database. "
         "Returns relationship patterns without property details. "
         "Can filter by specific entity type and direction. "
         "Maximum 50 results."
     ),
     "description_locale": {
         "zh": (
-            "从Neo4j图数据库查询实体类型之间的关系模式，不包含属性信息，最多返回50条结果。"
+            "从Kuzu图数据库查询实体类型之间的关系模式，不包含属性信息，最多返回50条结果。"
             "支持按指定实体类型和方向过滤关系网络。"
         )
     },
@@ -78,58 +78,79 @@ def _validate_entity_type(entity_type: str | None) -> dict[str, Any] | None:
     return None
 
 
+_EXCLUDED_RELS = frozenset({"IN_DOMAIN", "HAS_PROPERTY", "REFERENCES"})
+
+
 async def _fetch_rel_patterns(
     client: Any,
     entity_type: str | None = None,
     direction: str = "both",
 ) -> list[dict[str, str]]:
-    """Query relationship patterns from Neo4j schema.
+    """Query relationship patterns from Kuzu schema.
+
+    Discovers custom rel tables from show_tables(), then queries
+    Entity→Entity patterns with entity_type values as source/target.
 
     Args:
-        client: Neo4j client instance
+        client: Kuzu client instance
         entity_type: Optional entity type to filter relationships
         direction: Direction filter ('both', 'out', 'in')
 
     Returns:
         List of relationship patterns with source, target, rel_type
     """
-    query_parts = ["MATCH (s)-[r]->(t)"]
-    where_conditions = []
+    # Get all rel table names, excluding built-in ones
+    rows = await client.execute_schema("CALL show_tables() RETURN name, type")
+    rel_tables = [
+        r.get("name") for r in rows
+        if r.get("type") == "REL" and r.get("name") not in _EXCLUDED_RELS
+    ]
 
-    if entity_type:
-        if direction == "out":
-            where_conditions.append(f"labels(s)[0] = '{entity_type}'")
-        elif direction == "in":
-            where_conditions.append(f"labels(t)[0] = '{entity_type}'")
-        else:
-            where_conditions.append(
-                f"(labels(s)[0] = '{entity_type}' OR labels(t)[0] = '{entity_type}')"
+    seen: set[tuple[str, str, str]] = set()
+    rels: list[dict[str, str]] = []
+
+    for rel_table in rel_tables:
+        try:
+            query_parts = [f"MATCH (s:Entity)-[r:{rel_table}]->(t:Entity)"]
+            params: dict[str, str] = {}
+
+            if entity_type:
+                if direction == "out":
+                    query_parts.append("WHERE s.entity_type = $type")
+                    params["type"] = entity_type
+                elif direction == "in":
+                    query_parts.append("WHERE t.entity_type = $type")
+                    params["type"] = entity_type
+                else:
+                    query_parts.append("WHERE s.entity_type = $type OR t.entity_type = $type")
+                    params["type"] = entity_type
+
+            query_parts.append(
+                "RETURN DISTINCT s.entity_type AS source, t.entity_type AS target LIMIT 50"
             )
 
-    if where_conditions:
-        query_parts.append("WHERE " + " AND ".join(where_conditions))
+            result_rows = await client.execute_schema(" ".join(query_parts), params)
+            for row in result_rows:
+                source = row.get("source")
+                target = row.get("target")
+                if not source or not target:
+                    continue
+                key = (source, rel_table, target)
+                if key not in seen:
+                    seen.add(key)
+                    rels.append({"source": source, "target": target, "rel_type": rel_table})
+                    if len(rels) >= MAX_RESULTS:
+                        return rels
 
-    query_parts.append(
-        "WITH DISTINCT labels(s)[0] AS source, type(r) AS rel_type, labels(t)[0] AS target "
-        f"RETURN source, rel_type, target LIMIT {MAX_RESULTS}"
-    )
-
-    query = " ".join(query_parts)
-    rows = await client.execute_schema(query)
-
-    rels: list[dict[str, str]] = []
-    for row in rows:
-        source = row.get("source")
-        target = row.get("target")
-        rel_type = row.get("rel_type")
-        if source and target and rel_type:
-            rels.append({"source": source, "target": target, "rel_type": rel_type})
+        except Exception as e:
+            logger.warning("Failed to query rel table %s: %s", rel_table, e)
+            continue
 
     return rels[:MAX_RESULTS]
 
 
 async def execute(args: dict) -> AsyncGenerator[str, None]:
-    """Query relationship patterns from Neo4j graph schema.
+    """Query relationship patterns from Kuzu graph schema.
 
     Args:
         args: Dictionary containing:
@@ -165,7 +186,7 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             yield json.dumps(error, ensure_ascii=False)
             return
 
-        client = get_neo4j_client()
+        client = get_kuzu_client()
 
         # Build query message
         if entity_type:
@@ -208,11 +229,11 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             ensure_ascii=False,
         )
 
-    except Neo4jClientError as e:
-        logger.exception("Neo4j client error: %s", e)
+    except KuzuClientError as e:
+        logger.exception("Kuzu client error: %s", e)
         yield json.dumps({"success": False, "error": f"数据库连接错误: {e}"}, ensure_ascii=False)
     except Exception as e:
-        logger.exception("查询Neo4j关系结构异常: %s", e)
+        logger.exception("查询Kuzu关系结构异常: %s", e)
         yield json.dumps(
             {"success": False, "error": f"查询关系结构异常: {str(e)}"}, ensure_ascii=False
         )
