@@ -6,7 +6,7 @@
 
 - **Excel 注册表驱动** — 以 Excel 作为元数据唯一真实来源（SSOT），管理域、实体、属性、关系
 - **Kuzu 图同步** — 将注册表 Schema 自动同步至 Kuzu，构建 Domain → Entity → Property 层次图
-- **SQL 关系挖掘** — 基于 `sqlglot` 静态解析 PostgreSQL 存储过程，提取 JOIN / 数据血缘 / 表共现关系
+- **SQL 关系挖掘** — 基于 `sqlglot` 静态解析 PostgreSQL 存储过程，提取 JOIN / 数据血缘 / 表共现关系，输出 FIELD_LINK / ENTITY_LINK
 - **图算法分析** — 集成 Kuzu + NetworkX，支持 PageRank、Betweenness、Louvain 社区发现、节点相似度、WCC
 - **Agent 工具集** — 通过 FastAPI 暴露 10 个结构化工具供 AI Agent 调用
 
@@ -20,15 +20,16 @@
        ├──────────────────────────────────────┤
        │                                      │
        ▼                                      ▼
- GraphBuilder.sync_all()            RelationAggregator (SQL mining)
+ GraphBuilder.sync_all()            Miner (sqlglot AST)
        │                                      │
-       │                                 SqlParser (sqlglot)
        ▼                                      ▼
  ┌────────────────────────────────────────────────────────┐
- │                     Kuzu Graph DB                       │
- │  Domain ──IN_DOMAIN──> Entity ──HAS_PROPERTY──> Field   │
- │  Field ──REFERENCES──> Field                            │
- │  Entity ──JOINS_WITH──> Entity / DERIVES_FROM / SIMILAR │
+ │                    Kuzu Graph DB                        │
+ │  4 Node Tables: Domain / Entity / Field / Logic         │
+ │  9 Rel  Tables: IN_DOMAIN / HAS_PROPERTY / COMPUTES     │
+ │                  DECOMPOSES_TO / FIELD_LINK              │
+ │                  ENTITY_LINK / DOMAIN_LINK               │
+ │                  USE_LOGIC / HAS_LOGIC                   │
  └────────────────────────────────────────────────────────┘
        │
        ▼
@@ -119,14 +120,14 @@ python -m pytest tests/
 ## Agent 工具
 
 | 工具 | 说明 |
-|---|---|
-| `schema_search` | 按关键词搜索表和列 |
-| `subgraph_fetch` | 按领域提取完整子图 |
-| `lineage_trace` | 字段级数据血缘追踪 |
-| `join_path_find` | 表间最短 JOIN 路径 |
+|---|---|---|
+| `schema_search` | 按关键词搜索 Field 名和 Entity 名 |
+| `subgraph_fetch` | 按领域/实体提取子图 |
+| `lineage_trace` | Field 级数据血缘追踪 |
+| `join_path_find` | Entity 间最短 JOIN 路径 |
 | `sql_executor` | PostgreSQL 只读查询 |
-| `query_schema_data` | 查询所有实体类型及中文名 |
-| `query_schema_props` | 查询指定实体类型的属性列表 |
-| `query_schema_rels` | 查询实体间的自定义关系模式 |
+| `query_schema_data` | 查询所有 Entity 类型及中文名 |
+| `query_schema_props` | 查询指定 Entity 的属性列表 |
+| `query_schema_rels` | 查询 Entity 间的自定义关系 |
 | `risk_check` | 孤立外键 / 跨域引用 / 缺失主键 |
 | `graph_insight` | PageRank / Louvain 社区 / 图统计 |
