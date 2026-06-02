@@ -106,7 +106,7 @@ def _validate_start_node(start_node: str, node_type: str) -> dict[str, Any] | No
     return None
 
 
-_EXCLUDED_RELS = frozenset({"IN_DOMAIN", "HAS_PROPERTY"})
+_EXCLUDED_RELS = frozenset({"HAS_PROPERTY"})
 
 # Known rel table → (from_node_label, to_node_label)
 _REL_NODE_LABELS: dict[str, tuple[str, str]] = {
@@ -114,6 +114,7 @@ _REL_NODE_LABELS: dict[str, tuple[str, str]] = {
     "DECOMPOSES_TO": ("Logic", "Logic"),
     "FIELD_LINK": ("Field", "Field"),
     "ENTITY_LINK": ("Entity", "Entity"),
+    "IN_DOMAIN": ("Entity", "Domain"),
     "DOMAIN_LINK": ("Domain", "Domain"),
     "USE_LOGIC": ("Entity", "Logic"),
     "HAS_LOGIC": ("Domain", "Logic"),

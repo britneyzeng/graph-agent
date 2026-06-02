@@ -58,9 +58,9 @@
 ├── mining/                 # SQL 关系挖掘（sqlglot 解析）
 ├── analysis/               # 图算法（NetworkX 中心性/社区/相似度）
 ├── tools/                  # Agent 查询工具集
-│   ├── query_schema_data.py    # 查询实体类型列表
+│   ├── query_schema_data.py    # 查询类型数据（实体/逻辑/领域/关系）
 │   ├── query_schema_props.py   # 查询实体属性
-│   ├── query_schema_rels.py    # 查询实体间关系
+│   ├── query_schema_rels.py    # 查询指定节点的关系网络
 │   ├── query_tools/            # Schema 搜索 / 子图 / 血缘 / 联路 / SQL
 │   └── insight_tools/          # 图洞察 / 风险检查
 ├── scripts/                # CLI 入口（同步/导出/分析）
@@ -126,8 +126,8 @@ python -m pytest tests/
 | `lineage_trace` | Field 级数据血缘追踪 |
 | `join_path_find` | Entity 间最短 JOIN 路径 |
 | `sql_executor` | PostgreSQL 只读查询 |
-| `query_schema_data` | 查询所有 Entity 类型及中文名 |
-| `query_schema_props` | 查询指定 Entity 的属性列表 |
-| `query_schema_rels` | 查询 Entity 间的自定义关系 |
+| `query_schema_data` | 查询类型数据：实体类型/逻辑类型/领域/关系类型及中文名 |
+| `query_schema_props` | 查询指定实体类型的属性列表 |
+| `query_schema_rels` | 查询指定节点的关系网络（支持 Entity/Logic/Domain/Field） |
 | `risk_check` | 孤立外键 / 跨域引用 / 缺失主键 |
 | `graph_insight` | PageRank / Louvain 社区 / 图统计 |

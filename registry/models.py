@@ -61,7 +61,7 @@ class LogicDef:
 class RelationshipDef:
     src_fqn: str
     dst_fqn: str
-    rel_type: str = "REFERENCES"
+    rel_type: str = "FIELD_LINK"
     is_directed: bool = True
     source: str = "introspect"
     status: str = "active"

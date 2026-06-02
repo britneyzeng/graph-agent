@@ -152,7 +152,7 @@ class RegistryLoader:
                 RelationshipDef(
                     src_fqn=str(row[0]).strip(),
                     dst_fqn=str(row[1]).strip() if row[1] else "",
-                    rel_type=str(row[2]).strip() if len(row) > 2 and row[2] else "REFERENCES",
+                    rel_type=str(row[2]).strip() if len(row) > 2 and row[2] else "FIELD_LINK",
                     is_directed=self._parse_bool(row[3]) if len(row) > 3 else True,
                     source=str(row[4]).strip() if len(row) > 4 and row[4] else "introspect",
                     status=str(row[5]).strip() if len(row) > 5 and row[5] else "active",
