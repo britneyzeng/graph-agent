@@ -1,9 +1,9 @@
 """sqlglot AST parser for stored procedure SQL files.
 
 Extracts three types of evidence from PostgreSQL SQL:
-  - JOIN relations  (src_col ↔ dst_col with frequency)
-  - Field DERIVES_FROM lineage (INSERT/UPDATE → SELECT expr)
-  - Table CO_USED_WITH co-occurrence (per-procedure table sets)
+  - JOIN relations  (src_col ↔ dst_col, aggregated into FIELD_LINK)
+  - Field lineage (INSERT/UPDATE → SELECT expr, aggregated into FIELD_LINK)
+  - Table co-occurrence (per-procedure table sets, aggregated into ENTITY_LINK)
 """
 
 from __future__ import annotations

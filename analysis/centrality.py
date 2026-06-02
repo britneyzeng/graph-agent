@@ -29,7 +29,7 @@ def _build_column_graph(client) -> nx.Graph:
     for r in rows:
         G.add_node(r["fqn"])
     rows = client.execute(
-        "MATCH (c1:Field)-[r:REFERENCES|JOINS_WITH]-(c2:Field) "
+        "MATCH (c1:Field)-[r:FIELD_LINK]-(c2:Field) "
         "RETURN c1.fqn AS src, c2.fqn AS dst"
     )
     for r in rows:

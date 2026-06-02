@@ -1,16 +1,15 @@
 """Cross-file aggregation of mining evidence.
 
 Aggregates raw ParseResult across thousands of SQL files into:
-  - JOINS_WITH: (colA, colB) → frequency, join_types[], confidence
-  - DERIVES_FROM: (colA, colB) → proc_refs[], transform
-  - CO_USED_WITH: (tableA, tableB) → count, pmi
+  - FIELD_LINK (colA → colB): join co-occurrence / lineage
+  - ENTITY_LINK (tableA → tableB): table co-occurrence
 """
 
 from __future__ import annotations
 
 import logging
 import math
-from collections import Counter, defaultdict
+from collections import Counter
 
 from mining.sql_parser import ParseResult
 
@@ -36,19 +35,7 @@ class AggregatedJoin:
         return min(1.0, self.frequency / 3.0)
 
     def to_dict(self) -> dict:
-        return {
-            "src_fqn": self.src_fqn,
-            "dst_fqn": self.dst_fqn,
-            "rel_type": "JOINS_WITH",
-            "node_level": "column",
-            "is_directed": False,
-            "properties": {
-                "frequency": self.frequency,
-                "join_types": dict(self.join_types),
-                "confidence": self.confidence,
-                "evidence": self.evidence_sqls,
-            },
-        }
+        return {"src_fqn": self.src_fqn, "dst_fqn": self.dst_fqn}
 
 
 class AggregatedLineage:
@@ -69,20 +56,7 @@ class AggregatedLineage:
             self.evidence_sqls.append(evidence.context_sql[:200])
 
     def to_dict(self) -> dict:
-        return {
-            "src_fqn": self.src_fqn,
-            "dst_fqn": self.dst_fqn,
-            "rel_type": "DERIVES_FROM",
-            "node_level": "column",
-            "is_directed": True,
-            "properties": {
-                "frequency": self.frequency,
-                "transforms": list(self.transforms),
-                "proc_refs": self.proc_refs,
-                "confidence": min(1.0, self.frequency / 2.0),
-                "evidence": self.evidence_sqls,
-            },
-        }
+        return {"src_fqn": self.src_fqn, "dst_fqn": self.dst_fqn}
 
 
 class AggregatedCooccurrence:
@@ -97,16 +71,7 @@ class AggregatedCooccurrence:
         return self.properties.get("pmi", 0.0)
 
     def to_dict(self) -> dict:
-        props = {"count": self.count}
-        props.update(self.properties)
-        return {
-            "src_fqn": self.table_a,
-            "dst_fqn": self.table_b,
-            "rel_type": "CO_USED_WITH",
-            "node_level": "table",
-            "is_directed": False,
-            "properties": props,
-        }
+        return {"src_fqn": self.table_a, "dst_fqn": self.table_b}
 
 
 class RelationAggregator:
@@ -120,6 +85,20 @@ class RelationAggregator:
     @staticmethod
     def _ordered_key(a: str, b: str) -> tuple[str, str]:
         return (a, b) if a < b else (b, a)
+
+    def get_joins(self, min_freq: int = 2) -> list[AggregatedJoin]:
+        return [j for j in self.joins.values() if j.frequency >= min_freq]
+
+    def get_lineage(self) -> list[AggregatedLineage]:
+        return list(self.lineages.values())
+
+    def get_cooccurrences(self, min_pmi: float = 0.0) -> list[AggregatedCooccurrence]:
+        result = []
+        for coc in self.cooccurrences.values():
+            pmi = coc.properties.get("pmi", 0)
+            if pmi >= min_pmi:
+                result.append(coc)
+        return result
 
     def add_result(self, result: ParseResult, proc_name: str = ""):
         for je in result.joins:

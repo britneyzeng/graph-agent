@@ -6,6 +6,7 @@ Excel-based registry is the Single Source of Truth (SSOT).
 from registry.models import (
     DomainDef,
     EntityDef,
+    LogicDef,
     PropertyDef,
     RegistryData,
     RelationshipDef,
@@ -17,6 +18,7 @@ from registry.validator import RegistryValidator
 __all__ = [
     "DomainDef",
     "EntityDef",
+    "LogicDef",
     "PropertyDef",
     "RelationshipDef",
     "RegistryData",

@@ -25,6 +25,7 @@ class RegistryValidator:
         self._check_property_fqn_unique()
         self._check_property_entity_ref()
         self._check_fk_ref()
+        self._check_logic_fqn_unique()
         self._check_relationship_ref()
         self._check_domain_refs()
         return self.errors
@@ -34,11 +35,11 @@ class RegistryValidator:
         return len(self.errors) == 0
 
     def _check_domain_codes(self):
-        codes = {d.code for d in self.data.domains}
+        codes = {d.fqn for d in self.data.domains}
         for i, d in enumerate(self.data.domains):
-            if d.parent_code and d.parent_code not in codes:
+            if d.parent_fqn and d.parent_fqn not in codes:
                 self.errors.append(
-                    ValidationError("Domain", i + 2, f"parent_code '{d.parent_code}' not found")
+                    ValidationError("Domain", i + 2, f"parent_fqn '{d.parent_fqn}' not found")
                 )
 
     def _check_entity_fqn_unique(self):
@@ -74,30 +75,40 @@ class RegistryValidator:
     def _check_fk_ref(self):
         prop_fqns = {p.fqn for p in self.data.properties}
         for i, p in enumerate(self.data.properties):
-            if p.is_fk and p.ref_property_fqn:
+            if p.ref_property_fqn:
                 if p.ref_property_fqn not in prop_fqns:
                     self.errors.append(
                         ValidationError("Property", i + 2, f"FK ref_property_fqn '{p.ref_property_fqn}' not found")
                     )
 
+    def _check_logic_fqn_unique(self):
+        seen = {}
+        for i, l in enumerate(self.data.logics):
+            if l.fqn in seen:
+                self.errors.append(
+                    ValidationError("Logic", i + 2, f"duplicate fqn '{l.fqn}' (also at row {seen[l.fqn]})")
+                )
+            seen[l.fqn] = i + 2
+
     def _check_relationship_ref(self):
         all_fqns = {p.fqn for p in self.data.properties}
         all_fqns |= {e.fqn for e in self.data.entities}
-        all_fqns |= {d.code for d in self.data.domains}
+        all_fqns |= {d.fqn for d in self.data.domains}
+        all_fqns |= {l.fqn for l in self.data.logics}
         for i, r in enumerate(self.data.relationships):
             if r.src_fqn not in all_fqns:
                 self.errors.append(
                     ValidationError("Relationship", i + 2,
-                                   f"src_fqn '{r.src_fqn}' not found in any sheet (Entity/Property/Domain)")
+                                   f"src_fqn '{r.src_fqn}' not found in any sheet (Entity/Property/Domain/Logic)")
                 )
             if r.dst_fqn not in all_fqns:
                 self.errors.append(
                     ValidationError("Relationship", i + 2,
-                                   f"dst_fqn '{r.dst_fqn}' not found in any sheet (Entity/Property/Domain)")
+                                   f"dst_fqn '{r.dst_fqn}' not found in any sheet (Entity/Property/Domain/Logic)")
                 )
 
     def _check_domain_refs(self):
-        domain_codes = {d.code for d in self.data.domains}
+        domain_codes = {d.fqn for d in self.data.domains}
         for i, e in enumerate(self.data.entities):
             for dc in e.domains:
                 if dc not in domain_codes:

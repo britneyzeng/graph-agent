@@ -46,7 +46,7 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
         query = """
             MATCH (a:Entity {fqn: $a_fqn}), (b:Entity {fqn: $b_fqn})
             MATCH path = SHORTEST 1
-                (a)-[:HAS_PROPERTY]->(:Field)-[:REFERENCES|JOINS_WITH*1..$max_hops]-(:Field)<-[:HAS_PROPERTY]-(b)
+                (a)-[:HAS_PROPERTY]->(:Field)-[:FIELD_LINK*1..$max_hops]-(:Field)<-[:HAS_PROPERTY]-(b)
             RETURN nodes(path) AS node_path,
                    relationships(path) AS rel_path,
                    length(path) AS hops

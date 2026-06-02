@@ -36,7 +36,7 @@ def run_node_similarity(
     for r in rows:
         G.add_node(r["fqn"])
     rows = client.execute(
-        "MATCH (c1:Field)-[r:REFERENCES|JOINS_WITH]-(c2:Field) "
+        "MATCH (c1:Field)-[r:FIELD_LINK]-(c2:Field) "
         "RETURN c1.fqn AS src, c2.fqn AS dst"
     )
     for r in rows:
@@ -51,8 +51,8 @@ def run_node_similarity(
         if s < similarity_cutoff:
             continue
         client.execute(
-            "MERGE (c1:Field {fqn: $src})-[r:SIMILAR_TO {score: $score}]->(c2:Field {fqn: $dst})",
-            {"src": u, "dst": v, "score": round(s, 4)},
+            "MERGE (c1:Field {fqn: $src})-[r:FIELD_LINK {source: 'analysis', status: 'active'}]->(c2:Field {fqn: $dst})",
+            {"src": u, "dst": v},
         )
         rels_written += 1
         if rels_written >= top_k * len(list(G.nodes())):

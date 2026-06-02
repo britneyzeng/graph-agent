@@ -9,6 +9,7 @@ from openpyxl.styles import Font, PatternFill
 from registry.models import (
     DomainDef,
     EntityDef,
+    LogicDef,
     PropertyDef,
     RegistryData,
     RelationshipDef,
@@ -28,6 +29,7 @@ class RegistryWriter:
         self._write_domains(wb, data.domains)
         self._write_entities(wb, data.entities)
         self._write_properties(wb, data.properties)
+        self._write_logics(wb, data.logics)
         self._write_relationships(wb, data.relationships)
 
         wb.save(self.xlsx_path)
@@ -51,10 +53,10 @@ class RegistryWriter:
     def _write_domains(self, wb: Workbook, domains: list[DomainDef]):
         ws = wb.active
         ws.title = "Domain"
-        self._write_header(ws, ["code", "name_cn", "name_en", "parent_code", "description", "source", "status"])
+        self._write_header(ws, ["fqn", "name_cn", "name_en", "parent_fqn", "description", "source", "status"])
         for d in domains:
             ws.append(
-                [d.code, d.name_cn, d.name_en or "", d.parent_code or "", d.description, d.source, d.status]
+                [d.fqn, d.name_cn, d.name_en or "", d.parent_fqn or "", d.description, d.source, d.status]
             )
 
     def _write_entities(self, wb: Workbook, entities: list[EntityDef]):
@@ -86,7 +88,6 @@ class RegistryWriter:
                 "entity_fqn",
                 "data_type",
                 "is_pk",
-                "is_fk",
                 "ref_property_fqn",
                 "description",
                 "name_cn",
@@ -102,13 +103,41 @@ class RegistryWriter:
                     p.entity_fqn,
                     p.data_type,
                     self._to_bool(p.is_pk),
-                    self._to_bool(p.is_fk),
                     p.ref_property_fqn or "",
                     p.description,
                     p.name_cn,
                     p.name_en,
                     p.source,
                     p.status,
+                ]
+            )
+
+    def _write_logics(self, wb: Workbook, logics: list[LogicDef]):
+        ws = wb.create_sheet("Logic")
+        self._write_header(
+            ws,
+            [
+                "fqn",
+                "logic_type",
+                "expression",
+                "name_cn",
+                "name_en",
+                "description",
+                "source",
+                "status",
+            ],
+        )
+        for l in logics:
+            ws.append(
+                [
+                    l.fqn,
+                    l.logic_type,
+                    l.expression,
+                    l.name_cn,
+                    l.name_en,
+                    l.description,
+                    l.source,
+                    l.status,
                 ]
             )
 

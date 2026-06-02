@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 
 @dataclass
 class DomainDef:
-    code: str
+    fqn: str
     name_cn: str
     name_en: str = ""
-    parent_code: str | None = None
+    parent_fqn: str | None = None
     description: str = ""
     source: str = "manual"
     status: str = "active"
@@ -33,7 +33,6 @@ class PropertyDef:
     entity_fqn: str
     data_type: str
     is_pk: bool = False
-    is_fk: bool = False
     ref_property_fqn: str | None = None
     description: str = ""
     name_cn: str = ""
@@ -44,6 +43,18 @@ class PropertyDef:
     @property
     def name(self) -> str:
         return self.fqn.rsplit(".", 1)[-1]
+
+
+@dataclass
+class LogicDef:
+    fqn: str
+    logic_type: str
+    expression: str = ""
+    name_cn: str = ""
+    name_en: str = ""
+    description: str = ""
+    source: str = "manual"
+    status: str = "active"
 
 
 @dataclass
@@ -61,4 +72,5 @@ class RegistryData:
     domains: list[DomainDef] = field(default_factory=list)
     entities: list[EntityDef] = field(default_factory=list)
     properties: list[PropertyDef] = field(default_factory=list)
+    logics: list[LogicDef] = field(default_factory=list)
     relationships: list[RelationshipDef] = field(default_factory=list)

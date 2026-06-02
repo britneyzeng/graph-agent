@@ -11,6 +11,7 @@ from openpyxl import load_workbook
 from registry.models import (
     DomainDef,
     EntityDef,
+    LogicDef,
     PropertyDef,
     RegistryData,
     RelationshipDef,
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 SHEET_DOMAIN = "Domain"
 SHEET_ENTITY = "Entity"
 SHEET_PROPERTY = "Property"
+SHEET_LOGIC = "Logic"
 SHEET_RELATIONSHIP = "Relationship"
 
 REQUIRED_SHEETS = {SHEET_DOMAIN, SHEET_ENTITY, SHEET_PROPERTY, SHEET_RELATIONSHIP}
@@ -45,6 +47,7 @@ class RegistryLoader:
             domains=self._load_domains(wb),
             entities=self._load_entities(wb),
             properties=self._load_properties(wb),
+            logics=self._load_logics(wb),
             relationships=self._load_relationships(wb),
         )
         wb.close()
@@ -59,10 +62,10 @@ class RegistryLoader:
                 continue
             result.append(
                 DomainDef(
-                    code=str(row[0]).strip(),
+                    fqn=str(row[0]).strip(),
                     name_cn=str(row[1]).strip() if row[1] else "",
                     name_en=str(row[2]).strip() if len(row) > 2 and row[2] else "",
-                    parent_code=str(row[3]).strip() if len(row) > 3 and row[3] else None,
+                    parent_fqn=str(row[3]).strip() if len(row) > 3 and row[3] else None,
                     description=str(row[4]).strip() if len(row) > 4 and row[4] else "",
                     source=str(row[5]).strip() if len(row) > 5 and row[5] else "manual",
                     status=str(row[6]).strip() if len(row) > 6 and row[6] else "active",
@@ -105,13 +108,35 @@ class RegistryLoader:
                     entity_fqn=str(row[1]).strip() if row[1] else "",
                     data_type=str(row[2]).strip() if row[2] else "unknown",
                     is_pk=self._parse_bool(row[3]) if len(row) > 3 else False,
-                    is_fk=self._parse_bool(row[4]) if len(row) > 4 else False,
-                    ref_property_fqn=str(row[5]).strip() if len(row) > 5 and row[5] else None,
-                    description=str(row[6]).strip() if len(row) > 6 and row[6] else "",
-                    name_cn=str(row[7]).strip() if len(row) > 7 and row[7] else "",
-                    name_en=str(row[8]).strip() if len(row) > 8 and row[8] else "",
-                    source=str(row[9]).strip() if len(row) > 9 and row[9] else "manual",
-                    status=str(row[10]).strip() if len(row) > 10 and row[10] else "active",
+                    ref_property_fqn=str(row[4]).strip() if len(row) > 4 and row[4] else None,
+                    description=str(row[5]).strip() if len(row) > 5 and row[5] else "",
+                    name_cn=str(row[6]).strip() if len(row) > 6 and row[6] else "",
+                    name_en=str(row[7]).strip() if len(row) > 7 and row[7] else "",
+                    source=str(row[8]).strip() if len(row) > 8 and row[8] else "manual",
+                    status=str(row[9]).strip() if len(row) > 9 and row[9] else "active",
+                )
+            )
+        return result
+
+    def _load_logics(self, wb) -> list[LogicDef]:
+        if SHEET_LOGIC not in wb.sheetnames:
+            return []
+        ws = wb[SHEET_LOGIC]
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        result = []
+        for row in rows:
+            if not row or not row[0]:
+                continue
+            result.append(
+                LogicDef(
+                    fqn=str(row[0]).strip(),
+                    logic_type=str(row[1]).strip() if row[1] else "formula",
+                    expression=str(row[2]).strip() if len(row) > 2 and row[2] else "",
+                    name_cn=str(row[3]).strip() if len(row) > 3 and row[3] else "",
+                    name_en=str(row[4]).strip() if len(row) > 4 and row[4] else "",
+                    description=str(row[5]).strip() if len(row) > 5 and row[5] else "",
+                    source=str(row[6]).strip() if len(row) > 6 and row[6] else "manual",
+                    status=str(row[7]).strip() if len(row) > 7 and row[7] else "active",
                 )
             )
         return result

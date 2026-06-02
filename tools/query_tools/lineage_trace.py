@@ -18,9 +18,9 @@ TOOL = {
     "name": "lineage_trace",
     "display_name": "Lineage Trace",
     "display_name_locale": {"zh": "数据血缘追溯"},
-    "description": "Trace field-level data lineage along DERIVES_FROM relationships in Neo4j",
+    "description": "Trace field-level data lineage along FIELD_LINK relationships",
     "description_locale": {
-        "zh": "沿 DERIVES_FROM 关系追溯字段级数据血缘，支持上游（来源）和下游（去向）两个方向"
+        "zh": "沿 FIELD_LINK 关系追溯字段级数据血缘，支持上游（来源）和下游（去向）两个方向"
     },
     "params_model": LineageTraceParams,
 }
@@ -43,10 +43,9 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
 
         client = get_kuzu_client()
 
-        rel_pattern = "<-[:DERIVES_FROM]-" if direction == "upstream" else "-[:DERIVES_FROM]->"
+        arrow = "<-" if direction == "upstream" else "-"
         query = f"""
-            MATCH path = (start:Field {{fqn: $fqn}}){rel_pattern}(related:Field)
-            WHERE length(path) <= $max_depth
+            MATCH path = (start:Field {{fqn: $fqn}}){arrow}[:FIELD_LINK*1..$max_depth]-(related:Field)
             RETURN nodes(path) AS fqn_path,
                    relationships(path) AS rel_path,
                    length(path) AS depth

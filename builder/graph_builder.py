@@ -8,7 +8,7 @@ try:
 except ImportError:
     get_kuzu_client = None
 
-from builder.schema import NT, NP, ensure_schema
+from builder.schema import NT, NP, NL, ensure_schema
 from registry.models import RegistryData
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,19 @@ logger = logging.getLogger(__name__)
 
 class GraphBuilder:
     BATCH_SIZE = 500
+
+    # Map (src_type, dst_type) pairs to the canonical Kuzu rel table name
+    _REL_TABLE_MAP: dict[tuple[str, str], str] = {
+        ("Entity", "Domain"): "IN_DOMAIN",
+        ("Entity", "Field"): "HAS_PROPERTY",
+        ("Logic", "Field"): "COMPUTES",
+        ("Logic", "Logic"): "DECOMPOSES_TO",
+        ("Entity", "Entity"): "ENTITY_LINK",
+        ("Domain", "Domain"): "DOMAIN_LINK",
+        ("Field", "Field"): "FIELD_LINK",
+        ("Entity", "Logic"): "USE_LOGIC",
+        ("Domain", "Logic"): "HAS_LOGIC",
+    }
 
     def __init__(self, registry: RegistryData):
         self.registry = registry
@@ -28,24 +41,41 @@ class GraphBuilder:
     async def _run(self, query: str, params: dict | None = None):
         self._client().execute(query, params or {})
 
+    async def sync_all(self):
+        logger.info("Starting full graph sync ...")
+        get_kuzu_client(recreate=True)
+        ensure_schema(self._client())
+        await self._sync_domains()
+        await self._sync_entities()
+        await self._sync_properties()
+        await self._sync_logics()
+        await self._enrich_entities()
+        await self._sync_domain_links()
+        await self._sync_fk_field_links()
+        await self._sync_computes()
+        await self._sync_decomposes_to()
+        await self._sync_relationships()
+        logger.info("Graph sync completed.")
+
+    # ── Domain ──
+
     async def _sync_domains(self):
-        query = f"""
+        query = """
             UNWIND $batch AS d
-            MERGE (n:Domain {{code: d.code}})
-            SET n.fqn = d.code,
-                n.name_cn = d.name_cn,
+            MERGE (n:Domain {fqn: d.fqn})
+            SET n.name_cn = d.name_cn,
                 n.name_en = d.name_en,
-                n.parent_code = d.parent_code,
+                n.parent_fqn = d.parent_fqn,
                 n.description = d.description,
                 n.source = d.source,
                 n.status = d.status
         """
         batch = [
             {
-                "code": d.code,
+                "fqn": d.fqn,
                 "name_cn": d.name_cn,
                 "name_en": d.name_en or "",
-                "parent_code": d.parent_code or "",
+                "parent_fqn": d.parent_fqn or "",
                 "description": d.description,
                 "source": d.source,
                 "status": d.status,
@@ -54,6 +84,19 @@ class GraphBuilder:
         ]
         await self._run(query, {"batch": batch})
         logger.info("Synced %d Domain nodes", len(batch))
+
+    async def _sync_domain_links(self):
+        """parent_fqn → DOMAIN_LINK"""
+        for d in self.registry.domains:
+            if not d.parent_fqn:
+                continue
+            q = """
+                MATCH (parent:Domain {fqn: $parent}), (child:Domain {fqn: $code})
+                MERGE (child)-[:DOMAIN_LINK {source: 'registry', status: 'active'}]->(parent)
+            """
+            await self._run(q, {"parent": d.parent_fqn, "code": d.fqn})
+
+    # ── Entity ──
 
     async def _sync_entities(self):
         query = f"""
@@ -95,8 +138,10 @@ class GraphBuilder:
         if not rels:
             return
         for src, dst in rels:
-            q = f"MATCH (s:{NT} {{fqn: $src}}), (d:Domain {{code: $dst}}) MERGE (s)-[:IN_DOMAIN {{source: 'registry', status: 'active'}}]->(d)"
+            q = f"MATCH (s:{NT} {{fqn: $src}}), (d:Domain {{fqn: $dst}}) MERGE (s)-[:IN_DOMAIN {{source: 'registry', status: 'active'}}]->(d)"
             await self._run(q, {"src": src, "dst": dst})
+
+    # ── Property ──
 
     async def _sync_properties(self):
         query = f"""
@@ -106,7 +151,6 @@ class GraphBuilder:
             SET p.name = row.name,
                 p.data_type = row.data_type,
                 p.is_pk = row.is_pk,
-                p.is_fk = row.is_fk,
                 p.ref_property_fqn = row.ref_property_fqn,
                 p.description = row.description,
                 p.name_cn = row.name_cn,
@@ -124,7 +168,6 @@ class GraphBuilder:
                 "name": p.name,
                 "data_type": p.data_type,
                 "is_pk": p.is_pk,
-                "is_fk": p.is_fk,
                 "ref_property_fqn": p.ref_property_fqn or "",
                 "description": p.description,
                 "name_cn": p.name_cn,
@@ -139,6 +182,26 @@ class GraphBuilder:
             await self._run(query, {"batch": batch[i : i + self.BATCH_SIZE]})
         logger.info("Synced %d Property nodes + HAS_PROPERTY", len(batch))
 
+    async def _sync_fk_field_links(self):
+        """ref_property_fqn → FIELD_LINK"""
+        active_entity_fqns = {e.fqn for e in self.registry.entities if e.status == "active"}
+        fk_props = [
+            p for p in self.registry.properties
+            if p.ref_property_fqn and p.entity_fqn in active_entity_fqns
+        ]
+        count = 0
+        for p in fk_props:
+            q = f"""
+                MATCH (src:{NP} {{fqn: $src_fqn}}), (dst:{NP} {{fqn: $dst_fqn}})
+                MERGE (src)-[:FIELD_LINK {{source: 'fk_introspect', status: 'active'}}]->(dst)
+            """
+            await self._run(q, {"src_fqn": p.fqn, "dst_fqn": p.ref_property_fqn})
+            count += 1
+        if count:
+            logger.info("Created %d FIELD_LINK from FK", count)
+
+    # ── Entity enrichment ──
+
     async def _enrich_entities(self):
         active_entities = [e for e in self.registry.entities if e.status == "active"]
         if not active_entities:
@@ -148,7 +211,7 @@ class GraphBuilder:
         for e in active_entities:
             props = [p for p in self.registry.properties if p.entity_fqn == e.fqn]
             pk_names = [p.name for p in props if p.is_pk]
-            fk_names = [p.name for p in props if p.is_fk and p.ref_property_fqn]
+            fk_names = [p.name for p in props if p.ref_property_fqn]
             properties = {p.name: p.data_type for p in props}
             batch.append({
                 "fqn": e.fqn,
@@ -173,55 +236,126 @@ class GraphBuilder:
         await self._run(query, {"batch": batch})
         logger.info("Enriched %d entity nodes", len(batch))
 
-    async def _sync_fk_relationships(self):
-        active_entity_fqns = {e.fqn for e in self.registry.entities if e.status == "active"}
-        fk_properties = [
-            p for p in self.registry.properties
-            if p.is_fk and p.ref_property_fqn and p.entity_fqn in active_entity_fqns
+    # ── Logic ──
+
+    async def _sync_logics(self):
+        query = f"""
+            UNWIND $batch AS row
+            MERGE (n:{NL} {{fqn: row.fqn}})
+            SET n.logic_type = row.logic_type,
+                n.expression = row.expression,
+                n.name_cn = row.name_cn,
+                n.name_en = row.name_en,
+                n.description = row.description,
+                n.source = row.source,
+                n.status = row.status
+        """
+        batch = [
+            {
+                "fqn": l.fqn,
+                "logic_type": l.logic_type,
+                "expression": l.expression,
+                "name_cn": l.name_cn,
+                "name_en": l.name_en or "",
+                "description": l.description,
+                "source": l.source,
+                "status": l.status,
+            }
+            for l in self.registry.logics
+            if l.status == "active"
         ]
-        if not fk_properties:
+        if not batch:
             return
-        for p in fk_properties:
+        await self._run(query, {"batch": batch})
+        logger.info("Synced %d Logic nodes", len(batch))
+
+    async def _sync_computes(self):
+        """COMPUTES rel_type: Logic→Field (logic produces field)."""
+        count = 0
+        logic_fqns = {l.fqn for l in self.registry.logics if l.status == "active"}
+        field_fqns = {p.fqn for p in self.registry.properties}
+
+        for r in self.registry.relationships:
+            if r.status != "active" or r.rel_type != "COMPUTES":
+                continue
+            if r.src_fqn not in logic_fqns or r.dst_fqn not in field_fqns:
+                logger.warning("COMPUTES %s → %s: must be Logic→Field, skipped", r.src_fqn, r.dst_fqn)
+                continue
             q = f"""
-                MATCH (src:{NP} {{fqn: $src_fqn}}), (dst:{NP} {{fqn: $dst_fqn}})
-                MERGE (src)-[:REFERENCES {{source: 'fk_introspect', status: 'active'}}]->(dst)
+                MATCH (src:{NL} {{fqn: $src_fqn}}), (dst:{NP} {{fqn: $dst_fqn}})
+                MERGE (src)-[:COMPUTES {{source: 'registry', status: 'active'}}]->(dst)
             """
-            await self._run(q, {"src_fqn": p.fqn, "dst_fqn": p.ref_property_fqn})
-        logger.info("Auto-created %d FK relationships", len(fk_properties))
+            await self._run(q, {"src_fqn": r.src_fqn, "dst_fqn": r.dst_fqn})
+            count += 1
+        if count:
+            logger.info("Synced %d COMPUTES edges", count)
+
+    async def _sync_decomposes_to(self):
+        """DECOMPOSES_TO rel_type in Relationship sheet"""
+        count = 0
+        for r in self.registry.relationships:
+            if r.status != "active" or r.rel_type != "DECOMPOSES_TO":
+                continue
+            q = f"""
+                MATCH (src:{NL} {{fqn: $src_fqn}}), (dst:{NL} {{fqn: $dst_fqn}})
+                MERGE (src)-[:DECOMPOSES_TO {{source: 'registry', status: 'active'}}]->(dst)
+            """
+            await self._run(q, {"src_fqn": r.src_fqn, "dst_fqn": r.dst_fqn})
+            count += 1
+        if count:
+            logger.info("Synced %d DECOMPOSES_TO edges", count)
+
+    # ── General relationships → LINK tables ──
 
     async def _sync_relationships(self):
-        auto_created_tables: set[str] = set()
-        active_rels = [r for r in self.registry.relationships if r.status == "active"]
-        if not active_rels:
-            return
+        """Map remaining RelationshipDef to appropriate LINK tables by (src_type, dst_type)."""
+        entity_fqns = {e.fqn for e in self.registry.entities if e.status == "active"}
+        field_fqns = {p.fqn for p in self.registry.properties}
+        logic_fqns = {l.fqn for l in self.registry.logics if l.status == "active"}
+        domain_codes = {d.fqn for d in self.registry.domains}
 
-        for r in active_rels:
-            if r.rel_type not in auto_created_tables:
-                self._client().execute(
-                    f"CREATE REL TABLE IF NOT EXISTS {r.rel_type}(FROM {NT} TO {NT})"
+        def _resolve_type(fqn: str) -> str | None:
+            if fqn in entity_fqns:
+                return "Entity"
+            if fqn in field_fqns:
+                return "Field"
+            if fqn in logic_fqns:
+                return "Logic"
+            if fqn in domain_codes:
+                return "Domain"
+            return None
+
+        handled_special = {"COMPUTES", "DECOMPOSES_TO"}
+        count = 0
+
+        for r in self.registry.relationships:
+            if r.status != "active":
+                continue
+            if r.rel_type in handled_special:
+                continue
+
+            src_type = _resolve_type(r.src_fqn)
+            dst_type = _resolve_type(r.dst_fqn)
+            if src_type is None or dst_type is None:
+                logger.warning("Relationship %s: cannot resolve src/dst type, skipped", r.rel_type)
+                continue
+
+            table = self._REL_TABLE_MAP.get((src_type, dst_type))
+            if table is None:
+                logger.warning(
+                    "Relationship %s: no LINK table for (%s → %s), skipped. "
+                    "Canonical directions: Entity→Entity/Entity→Logic/Domain→Domain/Domain→Logic/Field→Field",
+                    r.rel_type, src_type, dst_type,
                 )
-                auto_created_tables.add(r.rel_type)
-            q = f"""
-                MATCH (src:{NT} {{fqn: $src_fqn}}), (dst:{NT} {{fqn: $dst_fqn}})
-                MERGE (src)-[:{r.rel_type}]->(dst)
-            """
-            try:
-                await self._run(q, {
-                    "src_fqn": r.src_fqn,
-                    "dst_fqn": r.dst_fqn,
-                })
-            except Exception as e:
-                logger.warning("Failed to create relationship %s: %s", r.rel_type, e)
-        logger.info("Processed %d manually-defined relationships", len(active_rels))
+                continue
 
-    async def sync_all(self):
-        logger.info("Starting full graph sync ...")
-        get_kuzu_client(recreate=True)
-        ensure_schema(self._client())
-        await self._sync_domains()
-        await self._sync_entities()
-        await self._sync_properties()
-        await self._enrich_entities()
-        await self._sync_fk_relationships()
-        await self._sync_relationships()
-        logger.info("Graph sync completed.")
+            q = f"""
+                MATCH (src:{src_type} {{fqn: $src_fqn}}), (dst:{dst_type} {{fqn: $dst_fqn}})
+                MERGE (src)-[:{table} {{source: $source, status: 'active'}}]->(dst)
+            """
+            await self._run(q, {"src_fqn": r.src_fqn, "dst_fqn": r.dst_fqn,
+                                "source": r.source})
+            count += 1
+
+        if count:
+            logger.info("Synced %d LINK relationships", count)

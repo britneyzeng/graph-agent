@@ -57,7 +57,7 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             RETURN DISTINCT
                 t.fqn AS table_fqn, t.name AS table_name, t.comment AS table_comment,
                 c.fqn AS col_fqn, c.name AS col_name, c.data_type AS col_type,
-                c.is_pk AS is_pk, c.is_fk AS is_fk
+                c.is_pk AS is_pk
         """
         nodes = await client.execute_schema(nodes_query, {"domain": domain})
 
@@ -79,7 +79,6 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
                     "name": r["col_name"],
                     "data_type": r.get("col_type", ""),
                     "is_pk": r.get("is_pk", False),
-                    "is_fk": r.get("is_fk", False),
                 }
             )
 

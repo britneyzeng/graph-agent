@@ -49,36 +49,45 @@ def main():
             aggregator.add(r)
         logger.info("  Parsed %s -> %d relations", sf.name, len(results))
 
-    from builder.schema import NT, NP, ensure_schema
+    from builder.schema import NP, ensure_schema
     from kuzu_client import get_kuzu_client
 
     client = get_kuzu_client()
     ensure_schema(client)
 
-    # Ensure rel tables for mining results
-    client.execute(f"CREATE REL TABLE IF NOT EXISTS JOINS_WITH(FROM {NP} TO {NP}, frequency INT64, confidence DOUBLE)")
-    client.execute(f"CREATE REL TABLE IF NOT EXISTS DERIVES_FROM(FROM {NP} TO {NP})")
-
     joins = aggregator.get_joins()
-    logger.info("Aggregated %d JOINS_WITH relations", len(joins))
+    logger.info("Aggregated %d JOIN relations (→ FIELD_LINK)", len(joins))
     for j in joins:
         d = j.to_dict()
         client.execute(
             f"MATCH (src:{NP} {{fqn: $src_fqn}}), (dst:{NP} {{fqn: $dst_fqn}})\n"
-            f"MERGE (src)-[:JOINS_WITH {{frequency: $freq, confidence: $conf}}]->(dst)",
-            {"src_fqn": d["src_fqn"], "dst_fqn": d["dst_fqn"],
-             "freq": d["properties"]["frequency"], "conf": d["properties"]["confidence"]},
+            f"MERGE (src)-[:FIELD_LINK {{source: 'sql_mining', status: 'active'}}]->(dst)",
+            {"src_fqn": d["src_fqn"], "dst_fqn": d["dst_fqn"]},
         )
 
     lineages = aggregator.get_lineage()
-    logger.info("Aggregated %d DERIVES_FROM relations", len(lineages))
+    logger.info("Aggregated %d LINEAGE relations (→ FIELD_LINK)", len(lineages))
     for ln in lineages:
         d = ln.to_dict()
         client.execute(
             f"MATCH (src:{NP} {{fqn: $src_fqn}}), (dst:{NP} {{fqn: $dst_fqn}})\n"
-            f"MERGE (src)-[:DERIVES_FROM]->(dst)",
+            f"MERGE (src)-[:FIELD_LINK {{source: 'sql_mining', status: 'active'}}]->(dst)",
             {"src_fqn": d["src_fqn"], "dst_fqn": d["dst_fqn"]},
         )
+
+    aggregator.compute_pmi()
+    coocs = aggregator.get_cooccurrences(min_pmi=0.0)
+    logger.info("Aggregated %d TABLE CO-OCCURRENCE relations (→ ENTITY_LINK)", len(coocs))
+    for coc in coocs:
+        d = coc.to_dict()
+        try:
+            client.execute(
+                f"MATCH (src:{NP} {{fqn: $src_fqn}}), (dst:{NP} {{fqn: $dst_fqn}})\n"
+                f"MERGE (src)-[:ENTITY_LINK {{source: 'sql_mining', status: 'active'}}]->(dst)",
+                {"src_fqn": d["src_fqn"], "dst_fqn": d["dst_fqn"]},
+            )
+        except Exception:
+            logger.warning("Skipping ENTITY_LINK (%s → %s): nodes not found", d["src_fqn"], d["dst_fqn"])
 
     logger.info("Mining complete.")
 

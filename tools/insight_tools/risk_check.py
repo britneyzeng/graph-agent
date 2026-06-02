@@ -36,10 +36,13 @@ RULES = {
         "zh": "外键无对应主表",
         "query": """
             MATCH (fk:Field)
-            WHERE fk.is_fk = true AND (fk.ref_property_fqn IS NULL OR fk.ref_property_fqn = '')
+            WHERE fk.ref_property_fqn IS NOT NULL AND fk.ref_property_fqn <> ''
+            OPTIONAL MATCH (target:Field {fqn: fk.ref_property_fqn})
+            WITH fk, target
+            WHERE target IS NULL
             {domain_filter}
             RETURN fk.fqn AS col_fqn, fk.name AS col_name,
-                   'is_fk=true but ref_property_fqn is empty' AS detail
+                   'ref_property_fqn points to non-existent field' AS detail
         """,
         "domain_var": "fk",
     },
@@ -47,7 +50,7 @@ RULES = {
         "name": "Cross-Domain Reference",
         "zh": "跨领域外键引用",
         "query": """
-            MATCH (c1:Field)-[:REFERENCES]->(c2:Field)
+            MATCH (c1:Field)-[r:FIELD_LINK]->(c2:Field)
             WHERE c1.domains <> c2.domains
             {domain_filter}
             RETURN c1.fqn AS col_fqn, c2.fqn AS ref_col_fqn,

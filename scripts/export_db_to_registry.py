@@ -1,12 +1,3 @@
-"""Export Kuzu graph DB back to registry Excel file.
-
-Reads all nodes and relationships from the Kuzu database and writes
-them to a registry Excel file that can be used with sync_to_graph.
-
-Usage:
-    python -m scripts.export_db_to_registry --output registry/exported_registry.xlsx
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -37,7 +28,7 @@ def main():
 
     client = get_kuzu_client()
 
-    domains = client.execute("MATCH (d:Domain) RETURN d.* ORDER BY d.code")
+    domains = client.execute("MATCH (d:Domain) RETURN d.* ORDER BY d.fqn")
     logger.info("Read %d Domain nodes", len(domains))
 
     entities = client.execute(
@@ -48,14 +39,17 @@ def main():
     fields = client.execute("MATCH (c:Field) RETURN c.* ORDER BY c.fqn")
     logger.info("Read %d Field nodes", len(fields))
 
+    logics = client.execute("MATCH (l:Logic) RETURN l.* ORDER BY l.fqn")
+    logger.info("Read %d Logic nodes", len(logics))
+
     rows_domain = []
     for d in domains:
         row = {k.replace("d.", ""): v for k, v in d.items()}
         rows_domain.append({
-            "code": _pop(row, "code"),
+            "fqn": _pop(row, "fqn"),
             "name_cn": _pop(row, "name_cn"),
             "name_en": _pop(row, "name_en"),
-            "parent_code": _pop(row, "parent_code"),
+            "parent_fqn": _pop(row, "parent_fqn"),
             "description": _pop(row, "description"),
             "source": _pop(row, "source"),
             "status": _pop(row, "status", "active"),
@@ -84,7 +78,6 @@ def main():
             "entity_fqn": _pop(row, "entity_fqn"),
             "data_type": _pop(row, "data_type"),
             "is_pk": row.get("is_pk", False),
-            "is_fk": row.get("is_fk", False),
             "ref_property_fqn": _pop(row, "ref_property_fqn"),
             "description": _pop(row, "description"),
             "name_cn": _pop(row, "name_cn"),
@@ -93,12 +86,26 @@ def main():
             "status": _pop(row, "status", "active"),
         })
 
-    rel_types = [
+    rows_logic = []
+    for l in logics:
+        row = {k.replace("l.", ""): v for k, v in l.items()}
+        rows_logic.append({
+            "fqn": _pop(row, "fqn"),
+            "logic_type": _pop(row, "logic_type"),
+            "expression": _pop(row, "expression"),
+            "name_cn": _pop(row, "name_cn"),
+            "name_en": _pop(row, "name_en"),
+            "description": _pop(row, "description"),
+            "source": _pop(row, "source"),
+            "status": _pop(row, "status", "active"),
+        })
+
+    rel_tables = [
         r["name"] for r in client.execute("CALL SHOW_TABLES() RETURN *")
-        if r["type"] == "REL" and r["name"] != "HAS_PROPERTY"
+        if r["type"] == "REL"
     ]
     rel_rows = []
-    for rel_type in rel_types:
+    for rel_type in rel_tables:
         try:
             rels = client.execute(
                 f"MATCH (src)-[r:{rel_type}]->(dst) RETURN src.fqn AS src_fqn, dst.fqn AS dst_fqn, r.*"
@@ -115,23 +122,25 @@ def main():
         except Exception as e:
             logger.warning("Skipping rel %s: %s", rel_type, e)
 
-    logger.info("Read %d relationships", len(rel_rows))
+    logger.info("Read %d relationships from %d rel tables", len(rel_rows), len(rel_tables))
 
-    from registry.models import DomainDef, EntityDef, PropertyDef, RelationshipDef, RegistryData
+    from registry.models import DomainDef, EntityDef, LogicDef, PropertyDef, RelationshipDef, RegistryData
     from registry.writer import RegistryWriter
 
     data = RegistryData(
         domains=[DomainDef(**d) for d in rows_domain],
         entities=[EntityDef(**e) for e in rows_entity],
         properties=[PropertyDef(**p) for p in rows_property],
+        logics=[LogicDef(**l) for l in rows_logic],
         relationships=[RelationshipDef(**r) for r in rel_rows],
     )
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     RegistryWriter(output_path).write(data)
-    logger.info("Exported %d domains, %d entities, %d properties, %d relationships -> %s",
-                len(data.domains), len(data.entities), len(data.properties), len(data.relationships), output_path)
+    logger.info("Exported %d domains, %d entities, %d properties, %d logics, %d relationships -> %s",
+                len(data.domains), len(data.entities), len(data.properties), len(data.logics),
+                len(data.relationships), output_path)
 
     close_kuzu_client()
 
