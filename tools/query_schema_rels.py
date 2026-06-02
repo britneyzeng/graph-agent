@@ -1,10 +1,12 @@
 """Query schema relationships tool for Kuzu graph database.
 
-This tool queries relationship patterns between entity types from Kuzu schema database.
+This tool queries relationship patterns between node types from Kuzu schema database.
+Supports filtering by a start node of any type (Entity, Logic, Domain, Field).
 """
 
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -18,24 +20,41 @@ logger = logging.getLogger(__name__)
 # Maximum number of results to return
 MAX_RESULTS = 500000
 
+# Supported node types for filtering
+_VALID_NODE_TYPES = frozenset({"Entity", "Logic", "Domain", "Field"})
+
+# Which property to use as the display identifier for each node label
+_IDENTIFIER: dict[str, str] = {
+    "Entity": "entity_type",
+    "Logic": "fqn",
+    "Domain": "fqn",
+    "Field": "fqn",
+}
+
 
 class QuerySchemaRelsParams(BaseModel):
     """Parameters for query_schema_rels tool."""
 
-    entity_type: str | None = Field(
-        default=None,
+    start_node: str = Field(
         description=(
-            "Optional entity type (label) to filter related entities. "
-            "If provided, returns relationships connected to this entity type. "
-            "If not provided, returns all relationship patterns."
+            "Start node value to find relationships for. "
+            "For node_type='Entity', this is the entity_type (e.g. 'supplier'). "
+            "For other node types, this is the FQN (e.g. 'proc.supplier_risk_rule')."
+        ),
+    )
+    node_type: str = Field(
+        default="Entity",
+        description=(
+            "Node type of start_node: Entity, Logic, Domain, or Field. "
+            "Default is 'Entity'."
         ),
     )
     direction: str = Field(
         default="both",
         description=(
-            "Relationship direction filter when entity_type is provided: "
-            "'out' - outgoing relationships from entity_type, "
-            "'in' - incoming relationships to entity_type, "
+            "Relationship direction filter when start_node is provided: "
+            "'out' - outgoing relationships from start_node, "
+            "'in' - incoming relationships to start_node, "
             "'both' - both directions (default)"
         ),
     )
@@ -46,15 +65,14 @@ TOOL = {
     "display_name": "Query Schema Relationships",
     "display_name_locale": {"zh": "查询图谱关系结构"},
     "description": (
-        "Query relationship patterns between entity types from Kuzu graph schema database. "
+        "Query relationship patterns from Kuzu graph schema database for a given node. "
         "Returns relationship patterns without property details. "
-        "Can filter by specific entity type and direction. "
         "Maximum 50 results."
     ),
     "description_locale": {
         "zh": (
-            "从Kuzu图数据库查询实体类型之间的关系模式，不包含属性信息，最多返回50条结果。"
-            "支持按指定实体类型和方向过滤关系网络。"
+            "从Kuzu图数据库查询指定节点的关系模式，不包含属性信息，最多返回50条结果。"
+            "起始节点可以是Entity、Logic、Domain、Field任意类型。"
         )
     },
     "params_model": QuerySchemaRelsParams,
@@ -62,44 +80,52 @@ TOOL = {
 
 
 def _sanitize_identifier(name: str) -> bool:
-    """Check if identifier is safe (only alphanumeric and underscore)."""
+    """Check if identifier is safe (only alphanumeric, underscore, and dots)."""
     if not name or not isinstance(name, str):
         return False
-    return name.replace("_", "").isalnum()
+    return bool(re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_.]*", name))
 
 
-def _validate_entity_type(entity_type: str | None) -> dict[str, Any] | None:
-    """Validate entity_type parameter. Returns error dict if invalid."""
-    if entity_type and not _sanitize_identifier(entity_type):
+def _validate_start_node(start_node: str, node_type: str) -> dict[str, Any] | None:
+    """Validate start_node parameter. Returns error dict if invalid."""
+    if not start_node:
+        return {"success": False, "error": "错误: start_node 不能为空"}
+    if not _sanitize_identifier(start_node):
         return {
             "success": False,
-            "error": (f"错误: entity_type '{entity_type}' 包含非法字符，只允许字母、数字和下划线"),
+            "error": (f"错误: start_node '{start_node}' 包含非法字符，只允许字母、数字、下划线和点"),
+        }
+    if node_type not in _VALID_NODE_TYPES:
+        return {
+            "success": False,
+            "error": (
+                f"错误: node_type '{node_type}' 无效，必须为 "
+                f"{', '.join(sorted(_VALID_NODE_TYPES))}"
+            ),
         }
     return None
 
 
-_EXCLUDED_RELS = frozenset({"IN_DOMAIN", "HAS_PROPERTY", "REFERENCES"})
+_EXCLUDED_RELS = frozenset({"IN_DOMAIN", "HAS_PROPERTY"})
+
+# Known rel table → (from_node_label, to_node_label)
+_REL_NODE_LABELS: dict[str, tuple[str, str]] = {
+    "COMPUTES": ("Logic", "Field"),
+    "DECOMPOSES_TO": ("Logic", "Logic"),
+    "FIELD_LINK": ("Field", "Field"),
+    "ENTITY_LINK": ("Entity", "Entity"),
+    "DOMAIN_LINK": ("Domain", "Domain"),
+    "USE_LOGIC": ("Entity", "Logic"),
+    "HAS_LOGIC": ("Domain", "Logic"),
+}
 
 
 async def _fetch_rel_patterns(
     client: Any,
-    entity_type: str | None = None,
+    start_node: str,
+    node_type: str = "Entity",
     direction: str = "both",
 ) -> list[dict[str, str]]:
-    """Query relationship patterns from Kuzu schema.
-
-    Discovers custom rel tables from show_tables(), then queries
-    Entity→Entity patterns with entity_type values as source/target.
-
-    Args:
-        client: Kuzu client instance
-        entity_type: Optional entity type to filter relationships
-        direction: Direction filter ('both', 'out', 'in')
-
-    Returns:
-        List of relationship patterns with source, target, rel_type
-    """
-    # Get all rel table names, excluding built-in ones
     rows = await client.execute_schema("CALL show_tables() RETURN name, type")
     rel_tables = [
         r.get("name") for r in rows
@@ -109,38 +135,51 @@ async def _fetch_rel_patterns(
     seen: set[tuple[str, str, str]] = set()
     rels: list[dict[str, str]] = []
 
+    def _collect(key: tuple[str, str, str], source: str, target: str) -> None:
+        if key not in seen and source and target:
+            seen.add(key)
+            rels.append({"source": source, "target": target, "rel_type": key[1]})
+
     for rel_table in rel_tables:
         try:
-            query_parts = [f"MATCH (s:Entity)-[r:{rel_table}]->(t:Entity)"]
-            params: dict[str, str] = {}
+            labels = _REL_NODE_LABELS.get(rel_table)
+            if labels is None:
+                continue
+            from_label, to_label = labels
 
-            if entity_type:
-                if direction == "out":
-                    query_parts.append("WHERE s.entity_type = $type")
-                    params["type"] = entity_type
-                elif direction == "in":
-                    query_parts.append("WHERE t.entity_type = $type")
-                    params["type"] = entity_type
-                else:
-                    query_parts.append("WHERE s.entity_type = $type OR t.entity_type = $type")
-                    params["type"] = entity_type
+            params: dict[str, str] = {"v": start_node}
 
-            query_parts.append(
-                "RETURN DISTINCT s.entity_type AS source, t.entity_type AS target LIMIT 50"
-            )
+            if direction != "in" and from_label == node_type:
+                src_id = _IDENTIFIER.get(from_label, "fqn")
+                dst_id = _IDENTIFIER.get(to_label, "fqn")
 
-            result_rows = await client.execute_schema(" ".join(query_parts), params)
-            for row in result_rows:
-                source = row.get("source")
-                target = row.get("target")
-                if not source or not target:
-                    continue
-                key = (source, rel_table, target)
-                if key not in seen:
-                    seen.add(key)
-                    rels.append({"source": source, "target": target, "rel_type": rel_table})
+                q = (
+                    f"MATCH (s:{from_label})-[r:{rel_table}]->(t:{to_label}) "
+                    f"WHERE s.{src_id} = $v "
+                    f"RETURN DISTINCT s.{src_id} AS source, "
+                    f"t.{dst_id} AS target "
+                    "LIMIT 50"
+                )
+                for row in await client.execute_schema(q, params):
+                    _collect((row["source"], rel_table, row["target"]), row["source"], row["target"])
                     if len(rels) >= MAX_RESULTS:
-                        return rels
+                        return rels[:MAX_RESULTS]
+
+            if direction != "out" and to_label == node_type:
+                src_id = _IDENTIFIER.get(from_label, "fqn")
+                dst_id = _IDENTIFIER.get(to_label, "fqn")
+
+                q = (
+                    f"MATCH (s:{from_label})-[r:{rel_table}]->(t:{to_label}) "
+                    f"WHERE t.{dst_id} = $v "
+                    f"RETURN DISTINCT s.{src_id} AS source, "
+                    f"t.{dst_id} AS target "
+                    "LIMIT 50"
+                )
+                for row in await client.execute_schema(q, params):
+                    _collect((row["source"], rel_table, row["target"]), row["source"], row["target"])
+                    if len(rels) >= MAX_RESULTS:
+                        return rels[:MAX_RESULTS]
 
         except Exception as e:
             logger.warning("Failed to query rel table %s: %s", rel_table, e)
@@ -154,13 +193,15 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
 
     Args:
         args: Dictionary containing:
-            - entity_type: Optional entity type (label) to filter related entities
+            - start_node: Node value to find relationships for
+            - node_type: Node type of start_node (Entity, Logic, Domain, Field)
             - direction: Direction filter ('both', 'out', 'in')
 
     Yields:
         JSON strings with progress messages and final relationship patterns result
     """
-    entity_type = args.get("entity_type")
+    start_node = args.get("start_node", "")
+    node_type = args.get("node_type", "Entity")
     direction = args.get("direction", "both")
 
     try:
@@ -168,7 +209,6 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             {"status": "progress", "message": "正在查询图谱关系结构..."}, ensure_ascii=False
         )
 
-        # Validate parameters
         if direction not in ("both", "out", "in"):
             yield json.dumps(
                 {
@@ -181,32 +221,25 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
             )
             return
 
-        error = _validate_entity_type(entity_type)
+        error = _validate_start_node(start_node, node_type)
         if error:
             yield json.dumps(error, ensure_ascii=False)
             return
 
         client = get_kuzu_client()
 
-        # Build query message
-        if entity_type:
-            yield json.dumps(
-                {
-                    "status": "progress",
-                    "message": (
-                        f"正在查询与 '{entity_type}' 相关的节点关系网络（方向: {direction})..."
-                    ),
-                },
-                ensure_ascii=False,
-            )
-        else:
-            yield json.dumps(
-                {"status": "progress", "message": "正在查询所有节点关系网络..."},
-                ensure_ascii=False,
-            )
+        yield json.dumps(
+            {
+                "status": "progress",
+                "message": (
+                    f"正在查询与 '{start_node}' (类型: {node_type}) "
+                    f"相关的节点关系网络（方向: {direction})..."
+                ),
+            },
+            ensure_ascii=False,
+        )
 
-        # Fetch relationship patterns
-        rels = await _fetch_rel_patterns(client, entity_type, direction)
+        rels = await _fetch_rel_patterns(client, start_node, node_type, direction)
 
         yield json.dumps(
             {
@@ -221,7 +254,8 @@ async def execute(args: dict) -> AsyncGenerator[str, None]:
                 "success": True,
                 "data": {
                     "rels": rels,
-                    "entity_type": entity_type,
+                    "start_node": start_node,
+                    "node_type": node_type,
                     "direction": direction,
                     "limit_applied": MAX_RESULTS,
                 },
