@@ -18,6 +18,9 @@ env/
 .idea/
 
 # OS
+
+# Generated data
+kuzu_db/
 .DS_Store
 Thumbs.db
 
