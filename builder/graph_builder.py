@@ -8,7 +8,7 @@ try:
 except ImportError:
     get_kuzu_client = None
 
-from builder.schema import NT, NP, NL, ensure_schema
+from builder.schema import NL, NP, NT, ensure_schema
 from registry.models import RegistryData
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class GraphBuilder:
         ("Entity", "Domain"): "IN_DOMAIN",
         ("Entity", "Field"): "HAS_PROPERTY",
         ("Logic", "Field"): "COMPUTES",
-        ("Logic", "Logic"): "DECOMPOSES_TO",
+        ("Logic", "Logic"): "LOGIC_LINK",
         ("Entity", "Entity"): "ENTITY_LINK",
         ("Domain", "Domain"): "DOMAIN_LINK",
         ("Field", "Field"): "FIELD_LINK",
@@ -53,7 +53,7 @@ class GraphBuilder:
         await self._sync_domain_links()
         await self._sync_fk_field_links()
         await self._sync_computes()
-        await self._sync_decomposes_to()
+        await self._sync_logic_links()
         await self._sync_relationships()
         logger.info("Graph sync completed.")
 
@@ -111,7 +111,9 @@ class GraphBuilder:
                 n.source = e.source,
                 n.status = e.status
         """
-        skipped = [e.fqn for e in self.registry.entities if e.status == "active" and not e.entity_type]
+        skipped = [
+            e.fqn for e in self.registry.entities if e.status == "active" and not e.entity_type
+        ]
         if skipped:
             logger.warning("Skipping %d entities without entity_type: %s", len(skipped), skipped)
         batch = [
@@ -183,10 +185,11 @@ class GraphBuilder:
         logger.info("Synced %d Property nodes + HAS_PROPERTY", len(batch))
 
     async def _sync_fk_field_links(self):
-        """ref_property_fqn → FIELD_LINK"""
+        """主键 → 外键: FIELD_LINK 方向为主键字段指向外键字段"""
         active_entity_fqns = {e.fqn for e in self.registry.entities if e.status == "active"}
         fk_props = [
-            p for p in self.registry.properties
+            p
+            for p in self.registry.properties
             if p.ref_property_fqn and p.entity_fqn in active_entity_fqns
         ]
         count = 0
@@ -195,7 +198,8 @@ class GraphBuilder:
                 MATCH (src:{NP} {{fqn: $src_fqn}}), (dst:{NP} {{fqn: $dst_fqn}})
                 MERGE (src)-[:FIELD_LINK {{source: 'fk_introspect', status: 'active'}}]->(dst)
             """
-            await self._run(q, {"src_fqn": p.fqn, "dst_fqn": p.ref_property_fqn})
+            # 源: 主键字段 (ref_property_fqn), 目标: 外键字段 (p.fqn)
+            await self._run(q, {"src_fqn": p.ref_property_fqn, "dst_fqn": p.fqn})
             count += 1
         if count:
             logger.info("Created %d FIELD_LINK from FK", count)
@@ -213,15 +217,17 @@ class GraphBuilder:
             pk_names = [p.name for p in props if p.is_pk]
             fk_names = [p.name for p in props if p.ref_property_fqn]
             properties = {p.name: p.data_type for p in props}
-            batch.append({
-                "fqn": e.fqn,
-                "property_count": len(props),
-                "pk_properties": pk_names,
-                "fk_properties": fk_names,
-                "has_pk": len(pk_names) > 0,
-                "has_fk": len(fk_names) > 0,
-                "properties": json.dumps(properties, ensure_ascii=False),
-            })
+            batch.append(
+                {
+                    "fqn": e.fqn,
+                    "property_count": len(props),
+                    "pk_properties": pk_names,
+                    "fk_properties": fk_names,
+                    "has_pk": len(pk_names) > 0,
+                    "has_fk": len(fk_names) > 0,
+                    "properties": json.dumps(properties, ensure_ascii=False),
+                }
+            )
 
         query = f"""
             UNWIND $batch AS row
@@ -279,7 +285,9 @@ class GraphBuilder:
             if r.status != "active" or r.rel_type != "COMPUTES":
                 continue
             if r.src_fqn not in logic_fqns or r.dst_fqn not in field_fqns:
-                logger.warning("COMPUTES %s → %s: must be Logic→Field, skipped", r.src_fqn, r.dst_fqn)
+                logger.warning(
+                    "COMPUTES %s → %s: must be Logic→Field, skipped", r.src_fqn, r.dst_fqn
+                )
                 continue
             q = f"""
                 MATCH (src:{NL} {{fqn: $src_fqn}}), (dst:{NP} {{fqn: $dst_fqn}})
@@ -290,20 +298,20 @@ class GraphBuilder:
         if count:
             logger.info("Synced %d COMPUTES edges", count)
 
-    async def _sync_decomposes_to(self):
-        """DECOMPOSES_TO rel_type in Relationship sheet"""
+    async def _sync_logic_links(self):
+        """LOGIC_LINK rel_type in Relationship sheet"""
         count = 0
         for r in self.registry.relationships:
-            if r.status != "active" or r.rel_type != "DECOMPOSES_TO":
+            if r.status != "active" or r.rel_type != "LOGIC_LINK":
                 continue
             q = f"""
                 MATCH (src:{NL} {{fqn: $src_fqn}}), (dst:{NL} {{fqn: $dst_fqn}})
-                MERGE (src)-[:DECOMPOSES_TO {{source: 'registry', status: 'active'}}]->(dst)
+                MERGE (src)-[:LOGIC_LINK {{source: 'registry', status: 'active'}}]->(dst)
             """
             await self._run(q, {"src_fqn": r.src_fqn, "dst_fqn": r.dst_fqn})
             count += 1
         if count:
-            logger.info("Synced %d DECOMPOSES_TO edges", count)
+            logger.info("Synced %d LOGIC_LINK edges", count)
 
     # ── General relationships → LINK tables ──
 
@@ -325,7 +333,7 @@ class GraphBuilder:
                 return "Domain"
             return None
 
-        handled_special = {"COMPUTES", "DECOMPOSES_TO"}
+        handled_special = {"COMPUTES", "LOGIC_LINK"}
         count = 0
 
         for r in self.registry.relationships:
@@ -345,7 +353,9 @@ class GraphBuilder:
                 logger.warning(
                     "Relationship %s: no LINK table for (%s → %s), skipped. "
                     "Canonical directions: Entity→Entity/Entity→Logic/Domain→Domain/Domain→Logic/Field→Field",
-                    r.rel_type, src_type, dst_type,
+                    r.rel_type,
+                    src_type,
+                    dst_type,
                 )
                 continue
 
@@ -353,8 +363,7 @@ class GraphBuilder:
                 MATCH (src:{src_type} {{fqn: $src_fqn}}), (dst:{dst_type} {{fqn: $dst_fqn}})
                 MERGE (src)-[:{table} {{source: $source, status: 'active'}}]->(dst)
             """
-            await self._run(q, {"src_fqn": r.src_fqn, "dst_fqn": r.dst_fqn,
-                                "source": r.source})
+            await self._run(q, {"src_fqn": r.src_fqn, "dst_fqn": r.dst_fqn, "source": r.source})
             count += 1
 
         if count:

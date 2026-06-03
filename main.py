@@ -2,7 +2,7 @@
 
 This service provides tools for querying Kuzu graph database
 and PostgreSQL database, including schema search, subgraph fetch,
-lineage trace, join path discovery, SQL execution, risk check, and graph insights.
+lineage trace, join path discovery, SQL execution, and graph insights.
 """
 
 import logging
@@ -16,10 +16,8 @@ load_dotenv(Path(__file__).parent / ".env")
 
 from kuzu_client import close_kuzu_client, get_kuzu_client
 from pg_client import close_pg_client
-from tools.insight_tools.graph_insight import TOOL as GRAPH_INSIGHT_TOOL
-from tools.insight_tools.graph_insight import execute as graph_insight_execute
-from tools.insight_tools.risk_check import TOOL as RISK_CHECK_INSIGHT_TOOL
-from tools.insight_tools.risk_check import execute as risk_check_insight_execute
+from tools.graph_insight import TOOL as GRAPH_INSIGHT_TOOL
+from tools.graph_insight import execute as graph_insight_execute
 from tools.query_schema_data import TOOL as QUERY_SCHEMA_DATA_TOOL
 from tools.query_schema_data import execute as query_schema_data_execute
 from tools.query_schema_props import TOOL as QUERY_SCHEMA_PROPS_TOOL
@@ -71,11 +69,10 @@ def create_service() -> ServiceApp:
     service.add_tool(**QUERY_SCHEMA_PROPS_TOOL, handler=query_schema_props_execute)
     service.add_tool(**QUERY_SCHEMA_RELS_TOOL, handler=query_schema_rels_execute)
 
-    # Register insight tools
-    service.add_tool(**RISK_CHECK_INSIGHT_TOOL, handler=risk_check_insight_execute)
+    # Register insight tool
     service.add_tool(**GRAPH_INSIGHT_TOOL, handler=graph_insight_execute)
 
-    logger.info("All 10 tools registered successfully")
+    logger.info("All 9 tools registered successfully")
     return service
 
 

@@ -11,7 +11,7 @@ NL = "Logic"
 
 _DDL_STATEMENTS: list[str] = [
     # Node tables
-    f"""CREATE NODE TABLE IF NOT EXISTS Domain(
+    """CREATE NODE TABLE IF NOT EXISTS Domain(
         fqn STRING, name_cn STRING, name_en STRING,
         parent_fqn STRING, description STRING, source STRING, status STRING,
         PRIMARY KEY (fqn)
@@ -51,7 +51,7 @@ _DDL_STATEMENTS: list[str] = [
     f"""CREATE REL TABLE IF NOT EXISTS COMPUTES(
         FROM {NL} TO {NP}, source STRING, status STRING
     )""",
-    f"""CREATE REL TABLE IF NOT EXISTS DECOMPOSES_TO(
+    f"""CREATE REL TABLE IF NOT EXISTS LOGIC_LINK(
         FROM {NL} TO {NL}, source STRING, status STRING
     )""",
     f"""CREATE REL TABLE IF NOT EXISTS FIELD_LINK(
@@ -60,7 +60,7 @@ _DDL_STATEMENTS: list[str] = [
     f"""CREATE REL TABLE IF NOT EXISTS ENTITY_LINK(
         FROM {NT} TO {NT}, source STRING, status STRING
     )""",
-    f"""CREATE REL TABLE IF NOT EXISTS DOMAIN_LINK(
+    """CREATE REL TABLE IF NOT EXISTS DOMAIN_LINK(
         FROM Domain TO Domain, source STRING, status STRING
     )""",
     f"""CREATE REL TABLE IF NOT EXISTS USE_LOGIC(
